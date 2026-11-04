@@ -48,7 +48,15 @@ sudo port -N selfupdate > /dev/null
 sudo port -N -b install llvm-20 clang-20 > /dev/null
 sudo port -N install glslang cmake pkgconfig bison flex > /dev/null
 # meson and the Python modules Mesa's build needs, in a venv first in PATH (as userland/BUILD.md)
-python3 -m venv "$HOME/.venvs/mesa"; "$HOME/.venvs/mesa/bin/pip" -q install meson ninja mako pyyaml packaging
+# Under Rosetta the runner's python3 is Homebrew's arm64-only one: meson in it saw an aarch64 host, ninja ran arm64
+# and Mesa chose NEON code (runs 41894886487, 41899141435). MacPorts' x86_64 Python runs meson and ninja instead.
+PY=python3
+if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+  sudo port -N -b install python313 > /dev/null; PY=$MP/bin/python3.13
+  lipo -archs "$PY" | grep -qw x86_64 || { echo "MacPorts python is $(lipo -archs "$PY")"; exit 1; }
+fi
+rm -rf "$HOME/.venvs/mesa"; "$PY" -m venv "$HOME/.venvs/mesa"; "$HOME/.venvs/mesa/bin/pip" -q install meson ninja mako pyyaml packaging
+echo "meson python: $("$HOME/.venvs/mesa/bin/python3" -c 'import platform; print(platform.machine())')"
 export PATH=$HOME/.venvs/mesa/bin:$PATH
 LLVM_CONFIG=$MP/libexec/llvm-20/bin/llvm-config; "$LLVM_CONFIG" --version
 SDK=$(xcrun --sdk macosx --show-sdk-path)
