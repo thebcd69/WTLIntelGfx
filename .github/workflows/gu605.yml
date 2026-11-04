@@ -41,8 +41,10 @@ jobs:
           git init -q "$S/drm-kmod"; git -C "$S/drm-kmod" remote add origin https://github.com/freebsd/drm-kmod.git
           git -C "$S/drm-kmod" fetch -q --depth 1 origin "$DRM_KMOD_REV"; git -C "$S/drm-kmod" checkout -q FETCH_HEAD
           git clone -q --filter=tree:0 --no-checkout https://github.com/freebsd/freebsd-src.git "$S/freebsd"
-          git -C "$S/freebsd" sparse-checkout set --cone sys/compat/linuxkpi sys/sys sys/vm sys/amd64/include sys/x86/include \
-            sys/kern sys/contrib/ck sys/dev/pci sys/net sys/netinet sys/crypto sys/machine sys/libkern sys/bsm sys/security sys/geom
+          # all of sys/ but the other architectures and the big contrib trees (ck stays: LinuxKPI's epoch uses it)
+          git -C "$S/freebsd" sparse-checkout set --no-cone '/sys/*' '!/sys/contrib/*' '/sys/contrib/ck/' \
+            '!/sys/arm/' '!/sys/arm64/' '!/sys/riscv/' '!/sys/powerpc/' '!/sys/i386/' '!/sys/modules/' '!/sys/gnu/'
+          git -C "$S/freebsd" config core.sparseCheckoutCone false
           git -C "$S/freebsd" checkout -q "$FREEBSD_REV"
           git -C "$S/freebsd" log -1 --format='freebsd %H %cd'
           git -C "$S/drm-kmod" log -1 --format='drm-kmod %H %cd'
