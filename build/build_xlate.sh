@@ -13,7 +13,7 @@ export RUSTFLAGS="--remap-path-prefix=$X=/src --remap-path-prefix=$HOME/.cargo=/
 cd "$X"
 cargo build --release --manifest-path wrapper/Cargo.toml --target-dir "$O/target" > "$O/cargo.log" 2>&1 || { echo "cargo build failed: $O/cargo.log"; tail -20 "$O/cargo.log"; exit 4; }
 D=$O/libnvmtl_translate.dylib
-cp "$O/target/release/libnvmtl_translate.dylib" "$D"; strip -S "$D"
+cp "$O/target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release/libnvmtl_translate.dylib" "$D"; strip -S "$D"
 install_name_tool -id @rpath/libnvmtl_translate.dylib "$D" 2>/dev/null; codesign -f -s - "$D" 2>/dev/null
 SHIP=$(find "$REF" -name libnvmtl_translate.dylib | head -1)
 gone=$(comm -23 <(nm -gU "$SHIP" | awk '{print $3}' | sort) <(nm -gU "$D" | awk '{print $3}' | sort) | wc -l | tr -d ' ')
