@@ -45,7 +45,7 @@ ddcctl / MonitorControl / ghelper-mac
 |---|---|
 | `xg_kms_i2c` + `xgKms` op 6 | yazıldı; `xg_kms.c` harness bayraklarıyla (drm-kmod c16de0f, FreeBSD d2145e9) Linux clang'da hatasız/uyarısız derlendi |
 | XeGfxIntelFB `ddc.inc` (bus + `doI2CRequest`) | yazıldı; MacKernelSDK ile `-Wall -Werror` sözdizimi denetimi geçti |
-| CI | `gu605.yml` tetikleyicisine `gu605-ddc` eklendi (ön sürüm başlığında dal adı görünür) |
+| CI | `gu605-ddc quick` (macos-14): XeGfxIntelFB Apple clang `-Werror` ile derlenip bağlandı (edd39f5, başarılı). `gu605.yml` tetikleyicisine `gu605-ddc` eklendi; ama intel işi `gu605-display`'de de olduğu gibi firmware indirmesinde (HTTP 404) düşüyor, arm işi macos-15 kuyruğunda bekliyor — XeGfx.kext (xg_kms.c) henüz CI'da derlenmedi, yalnız yerelde |
 | Donanım testi | yok — önce sol USB-C'de görüntü gerekli (`GU605-DISPLAY-DESIGN.md` §9 adım 5) |
 
 ## Test (görüntü harici monitördeyken)
