@@ -11,7 +11,14 @@ DRM_REV=b97cbde15c5c3abfe44d78e8f57139e50f612fec
 MESA_REV=bffd91947efc1932da99aca69fc540d6d4201b0c
 SPIRVLLVM_TAG=v20.1.19
 MP=/opt/local
-MPPKG=https://github.com/macports/macports-base/releases/download/v2.12.7/MacPorts-2.12.7-15-Sequoia.pkg
+# The build is x86_64 throughout. On an Apple-silicon runner (macos-14 while the Intel runners are unavailable) the
+# caller runs this script under Rosetta (arch -x86_64), MacPorts installs x86_64 archives (build_arch x86_64) and
+# every tool, host one (mesa_clc) included, runs as x86_64.
+[ "$(uname -m)" = x86_64 ] || { echo "run under x86_64 (on Apple silicon: arch -x86_64 bash $0 ...)"; exit 1; }
+case "$(sw_vers -productVersion | cut -d. -f1)" in
+  14) MPOS=14-Sonoma ;; 15) MPOS=15-Sequoia ;; 26) MPOS=26-Tahoe ;; *) echo "no MacPorts pkg for macOS $(sw_vers -productVersion)"; exit 1 ;;
+esac
+MPPKG=https://github.com/macports/macports-base/releases/download/v2.12.7/MacPorts-2.12.7-$MPOS.pkg
 JOBS=$(sysctl -n hw.ncpu)
 if [ ! -x $MP/bin/port ]; then
   curl -fsSL --retry 3 -o /tmp/macports.pkg "$MPPKG"
@@ -19,6 +26,11 @@ if [ ! -x $MP/bin/port ]; then
   sudo installer -pkg /tmp/macports.pkg -target / > /dev/null
 fi
 export PATH=$MP/bin:$MP/sbin:$PATH
+if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+  grep -q '^build_arch' $MP/etc/macports/macports.conf && sudo sed -i '' 's/^build_arch.*/build_arch x86_64/' $MP/etc/macports/macports.conf \
+    || echo 'build_arch x86_64' | sudo tee -a $MP/etc/macports/macports.conf > /dev/null
+  echo "Rosetta: MacPorts build_arch x86_64"
+fi
 sudo port -N selfupdate > /dev/null
 sudo port -N -b install llvm-20 clang-20 > /dev/null
 sudo port -N install glslang cmake pkgconfig bison flex > /dev/null
@@ -28,6 +40,8 @@ export PATH=$HOME/.venvs/mesa/bin:$PATH
 LLVM_CONFIG=$MP/libexec/llvm-20/bin/llvm-config; "$LLVM_CONFIG" --version
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 export CC=/usr/bin/clang CXX=/usr/bin/clang++ OBJC=/usr/bin/clang SDKROOT=$SDK
+# under Rosetta, name the architecture anyway (cmake and meson both read these)
+[ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ] && export CFLAGS="-arch x86_64" CXXFLAGS="-arch x86_64" OBJCFLAGS="-arch x86_64" LDFLAGS="-arch x86_64" CMAKE_OSX_ARCHITECTURES=x86_64
 at_rev() { [ -d "$1/.git" ] || { git init -q "$1"; git -C "$1" remote add origin "$2"; }; git -C "$1" fetch -q --depth 1 origin "$3"; git -C "$1" checkout -q --force FETCH_HEAD; }
 at_rev "$X/drm" https://gitlab.freedesktop.org/mesa/libdrm.git "$DRM_REV"
 at_rev "$X/mesa" https://gitlab.freedesktop.org/mesa/mesa.git "$MESA_REV"
@@ -87,4 +101,8 @@ left=$(for f in "$A"/*.dylib; do otool -L "$f" | tail -n +2 | awk '{print $1}' |
 { echo "libdrm $DRM_REV + libdrm-macos.patch + libdrm-xegfx.patch"; echo "mesa $MESA_REV + mesa-macos.patch + mesa-xegfx.patch"
   echo "LLVM $("$LLVM_CONFIG" --version) (MacPorts) SPIRV-LLVM-Translator $SPIRVLLVM_TAG"
   (cd "$OUT" && shasum -a 256 libvulkan_intel.dylib libdrm.2.dylib air-runtime/*); } > "$OUT/USERLAND.txt"
+# everything shipped must be x86_64 (the Mac is Intel; a Rosetta slip would give arm64 libraries)
+for f in "$OUT"/*.dylib "$OUT"/air-runtime/*.dylib; do
+  a=$(lipo -archs "$f"); case " $a " in *" x86_64 "*) ;; *) echo "$f is $a, not x86_64"; exit 1;; esac; done
+echo "built on $(sw_vers -productVersion) $(uname -m) translated=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" >> "$OUT/USERLAND.txt"
 cat "$OUT/USERLAND.txt"
