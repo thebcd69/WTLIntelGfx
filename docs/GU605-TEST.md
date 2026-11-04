@@ -25,6 +25,8 @@ Her açılışın özeti ayrıca `EFI/GU605/last-boot.txt`'e kendiliğinden yaz�
 - Ekran donarsa ya da beyaz **panik yazısı** çıkarsa (debug=0x100 kendiliğinden yeniden başlatmaz): güç tuşuna
   basılı tut → aç. Sonraki açılışta otomatik koşu kendini kapatır (`autostart-off`), masaüstü yine gelir → giriş yap →
   `gu605-collect.sh`.
+- Test boyunca **uyku yok**: kapağı kapatma, Uyku menüsünü kullanma (i915'in uyku/uyanma desteği yok; uyanışta
+  ekran gelmeyebilir).
 - Masaüstü adımı (WindowServer Intel GPU'da) sonraki test: `gu605.conf`'ta `ECO_LEVEL=desktop`.
 
 ## Test 3 — Standard (isteğe bağlı, 1 açılış, 2 dk)
