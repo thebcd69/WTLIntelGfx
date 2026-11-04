@@ -82,7 +82,21 @@ unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
  * read by the overlay's display probe and stolen allocator.
  */
 int xg_kms_on = -1;
+/* xkpi/src/i915/xg_kms.h */
+struct xg_kms_mode {
+	unsigned int w, h, clock_khz, htotal, hss, hse, vtotal, vss, vse, flags, mhz, preferred;
+};
+int xg_kms_dump(char *buf, unsigned long len);
+int xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, int test, char *msg, unsigned long msglen);
+int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
+int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
+int xg_kms_client_init(void);
+extern void (*xg_kms_notify)(void);
+extern unsigned int xg_kms_hotplugs;
 }
+static bool xg_kms_ready(void);
+static int xg_kms_call(uintptr_t op, void *a, void *b, void *c);
+static void xg_kms_after_stage4(void);
 
 class XeGfxResident : public IOService {
 	OSDeclareDefaultStructors(XeGfxResident)
@@ -166,6 +180,10 @@ XeGfxResident::callPlatformFunction(const OSSymbol *name, bool wait, void *p1, v
 		*(int *)p4 = xg_fd_remote_ioctl((int)(uintptr_t)p1, (unsigned long)p2, (unsigned long long)(uintptr_t)p3);
 		return kIOReturnSuccess;
 	}
+	/* "xgKms" (op, a, b, c): the display path for XeGfxIntelFB (xg_kms_call); kIOReturnNotReady without it */
+	if (name && name->isEqualTo("xgKms"))
+		return xg_kms_ready() ? (xg_kms_call((uintptr_t)p1, p2, p3, p4) == 0 ? kIOReturnSuccess : kIOReturnError) :
+		    kIOReturnNotReady;
 	/* "xgTrace" (const char *line): XeGfxAccel's state, stored with the console trace (thread context only) */
 	if (name && name->isEqualTo("xgTrace") && p1 && gLogLock) {
 		IOInterruptState is = IOSimpleLockLockDisableInterrupt(gLogLock);
@@ -736,6 +754,8 @@ xg_run_stage(int s)
 				xg_i915_map_init();
 				rc = xg_gt_check();
 			}
+			if (rc == 1 && xg_kms_on == 1)
+				xg_kms_after_stage4();
 			/* KMS: i915 holds the surface itself (intel_plane_initial), nothing to reserve or move */
 			if (rc == 1 && xg_kms_on != 1 && gPipeLit && gBootSurf && xg_boot_fb_size) {
 				int err = xg_i915_reserve_bootfb(gBootSurf, xg_boot_fb_size);
@@ -964,12 +984,222 @@ SYSCTL_PROC(_debug, OID_AUTO, xegfx_log, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_L
 SYSCTL_STRING(_debug, OID_AUTO, xegfx_env, CTLFLAG_RW | CTLFLAG_LOCKED, xg_env, sizeof(xg_env),
     "tunables for the stages, name=value pairs");
 
+/*
+ * GU605 display path (docs/GU605-DISPLAY-DESIGN.md). Every entry point needs stage 4 passed with i915 owning the
+ * display, and none runs while a stage does; gKmsLock serialises them.
+ */
+static IOLock *gKmsLock;
+static char gKmsMsg[160];
+static thread_call_t gKmsNotifyCall;
+static unsigned gKmsNotified;
+
+static bool
+xg_kms_ready(void)
+{
+	return xg_kms_on == 1 && gStage >= 4 && gResult[4] == 1 && !gRunning && gKmsLock;
+}
+
+/* i915's hotplug work: publish the count; XeGfxIntelFB watches XeGfxKmsHotplugs (thread call, never i915's thread) */
+static void
+xg_kms_notify_fire(thread_call_param_t, thread_call_param_t)
+{
+	if (gResident)
+		gResident->setProperty("XeGfxKmsHotplugs", (unsigned long long)xg_kms_hotplugs, 32);
+	if (gResident)
+		gResident->messageClients(kIOMessageServicePropertyChange);
+	gKmsNotified++;
+}
+
+static void
+xg_kms_notify_cb(void)
+{
+	if (gKmsNotifyCall)
+		thread_call_enter(gKmsNotifyCall);
+}
+
+static void
+xg_kms_after_stage4(void)
+{
+	int err;
+
+	xg_kms_notify = xg_kms_notify_cb;
+	err = xg_kms_client_init();
+	IOLog("XeGfx: display path up, hotplug client %d\n", err);
+	if (gResident) {
+		gResident->setProperty("XeGfxKmsClient", (unsigned long long)(uint32_t)err, 32);
+		gResident->setProperty("XeGfxKmsReady", true);
+	}
+}
+
+/* "NAME", "NAME HZ", "NAME WxH", "NAME WxH@HZ", each optionally followed by " test"; HZ may be mHz (> 1000) */
+static int
+xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h, unsigned *mhz, int *test)
+{
+	const char *p = in;
+	size_t n = 0;
+
+	*w = *h = *mhz = 0;
+	*test = 0;
+	while (*p == ' ')
+		p++;
+	while (*p && *p != ' ' && n + 1 < nl)
+		name[n++] = *p++;
+	name[n] = 0;
+	if (!n)
+		return EINVAL;
+	while (*p) {
+		while (*p == ' ')
+			p++;
+		if (strncmp(p, "test", 4) == 0) {
+			*test = 1;
+			p += 4;
+			continue;
+		}
+		if (!*p)
+			break;
+		if (*p < '0' || *p > '9')
+			return EINVAL;
+		unsigned long a = strtoul(p, (char **)&p, 10);
+		if (*p == 'x') {
+			*w = (unsigned)a;
+			*h = (unsigned)strtoul(p + 1, (char **)&p, 10);
+			if (*p == '@')
+				a = strtoul(p + 1, (char **)&p, 10);
+			else
+				a = 0;
+		}
+		*mhz = a > 1000 ? (unsigned)a : (unsigned)a * 1000;
+		while (*p && *p != ' ')
+			p++;
+	}
+	return 0;
+}
+
+static int
+xg_kms_call(uintptr_t op, void *a, void *b, void *c)
+{
+	int ret = -EINVAL;
+
+	IOLockLock(gKmsLock);
+	switch (op) {
+	case 1: {	/* set: a = const char *name, b = uint32_t[4] {w, h, mHz, test}, c = char[128] message or NULL */
+		const uint32_t *v = (const uint32_t *)b;
+		char m[128];
+		if (a && v)
+			ret = xg_kms_set((const char *)a, v[0], v[1], v[2], (int)v[3], m, sizeof(m));
+		if (a && v) {
+			if (c)
+				strlcpy((char *)c, m, 128);
+			IOLog("XeGfx: kms set (fb): %s\n", m);
+		}
+		break;
+	}
+	case 2:		/* backlight: a = (intptr_t) per mille or -1, b = int *result (per mille or -errno) */
+		ret = xg_kms_backlight((int)(intptr_t)a, gKmsMsg, sizeof(gKmsMsg));
+		if (b)
+			*(int *)b = ret;
+		ret = ret < 0 ? ret : 0;
+		break;
+	case 3: {	/* modes: a = const char *name, b = struct xg_kms_mode[32], c = int[3] {count out, connected, -} + cur */
+		int *io = (int *)c, conn = 0;
+		struct xg_kms_mode *cur = (struct xg_kms_mode *)((char *)b + 32 * sizeof(struct xg_kms_mode));
+		if (a && b && io) {
+			ret = xg_kms_modes((const char *)a, (struct xg_kms_mode *)b, 32, &conn, cur);
+			io[0] = ret;
+			io[1] = conn;
+			ret = ret < 0 ? ret : 0;
+		}
+		break;
+	}
+	case 4:		/* hotplug count: a = unsigned * */
+		if (a) {
+			*(unsigned *)a = xg_kms_hotplugs;
+			ret = 0;
+		}
+		break;
+	}
+	IOLockUnlock(gKmsLock);
+	return ret;
+}
+
+static int
+xegfx_kms_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
+{
+	static char buf[48 * 1024];
+	int err;
+
+	if (!gKmsLock)
+		return ENODEV;
+	IOLockLock(gKmsLock);
+	if (xg_kms_ready())
+		xg_kms_dump(buf, sizeof(buf));
+	else
+		snprintf(buf, sizeof(buf), "display path not up: xg_kms_on %d stage %d result4 %d running %d why %s\n", xg_kms_on,
+		    gStage, gResult[4], gRunning, gKmsWhy[0] ? gKmsWhy : "-");
+	err = SYSCTL_OUT(req, buf, strlen(buf) + 1);
+	IOLockUnlock(gKmsLock);
+	return err;
+}
+
+static int
+xegfx_kms_set_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
+{
+	char in[96] = { 0 }, name[32];
+	unsigned w, h, mhz;
+	int test, err;
+
+	if (!gKmsLock)
+		return ENODEV;
+	if (!req->newptr)
+		return SYSCTL_OUT(req, gKmsMsg, strlen(gKmsMsg) + 1);
+	if (req->newlen >= sizeof(in))
+		return EINVAL;
+	if ((err = SYSCTL_IN(req, in, req->newlen)) != 0)
+		return err;
+	if (xg_kms_parse_set(in, name, sizeof(name), &w, &h, &mhz, &test) != 0)
+		return EINVAL;
+	if (!xg_kms_ready())
+		return ENXIO;
+	IOLockLock(gKmsLock);
+	err = xg_kms_set(name, w, h, mhz, test, gKmsMsg, sizeof(gKmsMsg));
+	IOLockUnlock(gKmsLock);
+	IOLog("XeGfx: kms set \"%s\": %s\n", in, gKmsMsg);
+	return err < 0 ? -err : 0;
+}
+
+static int
+xegfx_kms_bl_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
+{
+	int v = -1, err, r;
+
+	if (!xg_kms_ready())
+		return ENXIO;
+	err = sysctl_handle_int(nullptr, &v, 0, req);
+	if (err)
+		return err;
+	if (req->newptr && (v < 0 || v > 1000))
+		return EINVAL;
+	IOLockLock(gKmsLock);
+	r = xg_kms_backlight(req->newptr ? v : -1, gKmsMsg, sizeof(gKmsMsg));
+	IOLockUnlock(gKmsLock);
+	IOLog("XeGfx: kms backlight %d: %s\n", req->newptr ? v : -1, gKmsMsg);
+	return r < 0 ? -r : 0;
+}
+
+SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_sysctl, "A",
+    "GU605 display path: connectors, validated modes, link, DSC, backlight");
+SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms_set, CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_set_sysctl,
+    "A", "GU605 display path: \"NAME [HZ|WxH[@HZ]] [test]\"; reads the last result");
+SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms_bl, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_bl_sysctl, "I",
+    "GU605 display path: eDP brightness, per mille (write); the result is in debug.xegfx_kms_set");
+
 static struct sysctl_oid *const gOids[] = {
 	&sysctl__debug_xegfx_stage, &sysctl__debug_xegfx_results, &sysctl__debug_xegfx_fd, &sysctl__debug_xegfx_mem, &sysctl__debug_xegfx_running,
 	&sysctl__debug_xegfx_progress, &sysctl__debug_xegfx_wdog, &sysctl__debug_xegfx_env, &sysctl__debug_xegfx_log,
 	&sysctl__debug_xegfx_hold,
 	&sysctl__debug_xegfx_trace,
 	&sysctl__debug_xegfx_spin,
+	&sysctl__debug_xegfx_kms, &sysctl__debug_xegfx_kms_set, &sysctl__debug_xegfx_kms_bl,
 };
 
 /* Linux's struct va_format, the argument of "%pV" */
@@ -1186,7 +1416,9 @@ _start(kmod_info_t *ki, void *)
 	gWdogCall = thread_call_allocate(xg_wdog_fire, nullptr);
 	gHoldCall = thread_call_allocate(xg_hold_fire, nullptr);
 	gTraceCall = thread_call_allocate(xg_trace_fire, nullptr);
-	if (!gStageLock || !gWdogCall || !gHoldCall || !gTraceCall || !gLogLock || !gSnapLock)
+	gKmsLock = IOLockAlloc();
+	gKmsNotifyCall = thread_call_allocate(xg_kms_notify_fire, nullptr);
+	if (!gStageLock || !gWdogCall || !gHoldCall || !gTraceCall || !gLogLock || !gSnapLock || !gKmsLock || !gKmsNotifyCall)
 		return KERN_FAILURE;
 	/*
 	 * i915 stays off the display until XeGfx owns it, and gets the GuC explicitly: drm-kmod leaves enable_guc at -1 on
@@ -1217,5 +1449,8 @@ _stop(kmod_info_t *, void *)
 	IOLockFree(gStageLock);
 	IOSimpleLockFree(gLogLock);
 	IOLockFree(gSnapLock);
+	thread_call_cancel(gKmsNotifyCall);	/* stage 0: i915 never ran, nothing can call it */
+	thread_call_free(gKmsNotifyCall);
+	IOLockFree(gKmsLock);
 	return KERN_SUCCESS;
 }
