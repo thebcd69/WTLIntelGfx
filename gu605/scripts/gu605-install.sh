@@ -28,8 +28,24 @@ for k in $KEXTS; do [ -d "$EXT/$k.kext" ] && ditto "$EXT/$k.kext" "$BK/$k.kext";
 [ -d "$GB/XeMTLDriver.bundle" ] && ditto "$GB/XeMTLDriver.bundle" "$BK/XeMTLDriver.bundle"
 [ -d "$GB/xemtl" ] && ditto "$GB/xemtl" "$BK/xemtl"
 [ -d "$G" ] && ditto --norsrc "$G" "$BK/gu605-scripts" 2>/dev/null || true
-OLD=$(kmutil inspect -a x86_64 -A "$KC" 2>/dev/null | awk -F'\t' '$1 ~ /^[a-z]+\.[A-Za-z0-9.-]+$/ && $1 !~ /^com\.apple\./ {print $1}' | sort -u || true)
-echo "third-party kexts in the current collection: $(echo $OLD)"
+# NullMoth's NMIntelFB (built separately, not part of its installer) matches 8086:7D55 at a higher score than
+# XeGfxIntelFB and would take the panel in Eco: this test needs XeGfxIntelFB. Nothing of NullMoth's is moved here.
+[ ! -d "$EXT/NMIntelFB.kext" ] || [ "${GU605_ALLOW_NMINTELFB:-0}" = 1 ] || die "$EXT/NMIntelFB.kext is installed: it would drive the Intel panel instead of XeGfxIntelFB. Move it out of $EXT yourself (it is not part of NullMoth's installer), or run with GU605_ALLOW_NMINTELFB=1"
+# what the current collection holds, as text (kmutil's column layout is not relied on: IDs are looked up in it)
+OLDINS=$(kmutil inspect -a x86_64 -A "$KC" 2>/dev/null || true)
+[ ! -f "$KC" ] || [ -n "$OLDINS" ] || die "cannot inspect the current $KC: nothing changed"
+# every kext in $EXT that is in the current collection must be in the new one (NullMoth's above all)
+# a whole bundle ID in kmutil's text, not a prefix of a longer one (com.nullmoth.NVRM vs com.nullmoth.NVRMFB)
+has_id() { printf '%s\n' "$1" | grep -Eq "(^|[^A-Za-z0-9._-])$(printf '%s' "$2" | sed 's/[.]/[.]/g')([^A-Za-z0-9._-]|\$)"; }
+KEEP=""
+for x in "$EXT"/*.kext; do
+  [ -f "$x/Contents/Info.plist" ] || continue
+  id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$x/Contents/Info.plist" 2>/dev/null) || continue
+  if has_id "$OLDINS" "$id"; then KEEP="$KEEP $id"; fi
+done
+NMIDS=$(printf '%s\n' "$OLDINS" | grep -oE '(com\.nullmoth\.[A-Za-z0-9]+|org\.hackintosh\.experimental\.NVPrimarySelector)' | sort -u | tr '\n' ' ' || true)
+echo "kexts of $EXT in the current collection: $KEEP"
+echo "NullMoth in the current collection: ${NMIDS:-none}"
 
 for k in $KEXTS; do
   rm -rf "$EXT/$k.kext.new"; ditto "$P/Library/Extensions/$k.kext" "$EXT/$k.kext.new"
@@ -70,15 +86,16 @@ install -m 644 -o root -g wheel "$P/launchd/org.thebcd69.gu605.auto.plist" /Libr
 echo "rebuilding the auxiliary kernel collection (keeps every kext in $EXT)"
 K=/System/Library/Kernels/kernel; KARG=(--allow-missing-kdk); [ -f "$K" ] && KARG+=(--kernel "$K")
 NEW=$KC.gu605-new; rm -f "$NEW"
-# exactly the old collection's kexts plus ours, by bundle ID (as NullMoth's installer names its own), from permanent paths
-BIDS=(); for b in $(echo $OLD | tr ' ' '\n' | sort -u) org.watchthelight.XeGfxIntelFB org.watchthelight.XeGfxAccel org.watchthelight.XeGfxAGDC org.local.XgFbMove; do BIDS+=(-b "$b"); done
+# as NullMoth's installer (proven on this machine): the whole of $EXT, owned by root (macOS skips other owners)
 kmutil create -n aux --volume-root / "${KARG[@]}" -B /System/Library/KernelCollections/BootKernelExtensions.kc \
-  -S /System/Library/KernelCollections/SystemKernelExtensions.kc --repository "$EXT" "${BIDS[@]}" -A "$NEW" -z > "$BK/kmutil.log" 2>&1 \
-  || die "kmutil failed (log $BK/kmutil.log); the old collection is still in place"
+  -S /System/Library/KernelCollections/SystemKernelExtensions.kc --repository "$EXT" -A "$NEW" -z > "$BK/kmutil.log" 2>&1 \
+  || { tail -20 "$BK/kmutil.log"; die "kmutil failed (log $BK/kmutil.log; a kext in $EXT that names a missing dependency stops it); the old collection is still in place, but the new files are installed: restore from $BK or fix and rerun"; }
+[ -s "$NEW" ] || die "kmutil produced no collection; the old one is still in place"
 INS=$(kmutil inspect -a x86_64 -A "$NEW" 2>/dev/null) || die "cannot inspect the new collection"
-for b in $OLD org.watchthelight.XeGfxIntelFB org.watchthelight.XeGfxAccel org.watchthelight.XeGfxAGDC org.local.XgFbMove; do
-  printf '%s\n' "$INS" | grep -E "^$b[[:space:]]" > /dev/null || die "$b would be missing from the new collection (old one kept; $NEW left for inspection)"
+for b in $KEEP $NMIDS org.watchthelight.XeGfxIntelFB org.watchthelight.XeGfxAccel org.watchthelight.XeGfxAGDC org.local.XgFbMove; do
+  has_id "$INS" "$b" || die "$b would be missing from the new collection (old one kept; $NEW left for inspection)"
 done
+echo "new collection: every earlier kext kept (${NMIDS:-no NullMoth}) plus XeGfxIntelFB, XeGfxAccel, XeGfxAGDC, XgFbMove"
 mv -f "$KC" "$BK/AuxiliaryKernelExtensions.kc.before" 2>/dev/null || true
 mv -f "$NEW" "$KC"
 # the collection the next boot reads is the Preboot copy: kcditto puts the new one there (samwu07's installer does too)
