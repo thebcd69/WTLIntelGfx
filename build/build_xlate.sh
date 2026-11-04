@@ -17,6 +17,7 @@ cp "$O/target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release/libnvmtl_transl
 install_name_tool -id @rpath/libnvmtl_translate.dylib "$D" 2>/dev/null; codesign -f -s - "$D" 2>/dev/null
 SHIP=$(find "$REF" -name libnvmtl_translate.dylib | head -1)
 gone=$(comm -23 <(nm -gU "$SHIP" | awk '{print $3}' | sort) <(nm -gU "$D" | awk '{print $3}' | sort) | wc -l | tr -d ' ')
-for p in NVMTL_NO_BINDLESS_ALL NVMTL_NO_TIER2; do strings -a "$D" | grep -q -- "$p" || echo "MISSING marker $p"; done
+strings -a "$D" > "$O/strings.txt" 2>/dev/null || true   # grep -q on the pipe made strings fail ("failed to flush")
+for p in NVMTL_NO_BINDLESS_ALL NVMTL_NO_TIER2; do grep -q -- "$p" "$O/strings.txt" || echo "MISSING marker $p"; done
 echo "libnvmtl_translate $(git -C "$R" rev-parse --short HEAD) sha $(shasum -a256 "$D" | cut -c1-12) exports-missing-vs-2.1.0 $gone"
 echo "$D"

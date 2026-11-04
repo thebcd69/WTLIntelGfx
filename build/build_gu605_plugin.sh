@@ -19,7 +19,7 @@ rm -rf "$O"; mkdir -p "$B/Contents/MacOS" "$O"
 RDEF=""; [ -n "${RELEASE:-}" ] && RDEF="-DNVMTL_RELEASE=1"
 rm -rf "$O/src"; mkdir -p "$O/src"; cp -R "$R/plugin/." "$O/src/"
 grep -rl '/Library/GPUBundles/nvmtl/' "$O/src" | while read -r f; do sed -i '' 's#/Library/GPUBundles/nvmtl/#/Library/GPUBundles/xemtl/#g' "$f"; done
-left=$(grep -rn '/Library/GPUBundles/nvmtl/' "$O/src" | wc -l | tr -d ' ')
+left=$( (grep -rn '/Library/GPUBundles/nvmtl/' "$O/src" || true) | wc -l | tr -d ' ')   # grep finds none: exit 1 under pipefail
 [ "$left" = 0 ] || { echo "STOP: $left nvmtl paths left"; exit 6; }
 cd "$O/src"
 xcrun clang -arch x86_64 -bundle -fobjc-arc -O1 $RDEF -DNVMTL_ALLOW_LIST='"/Library/GPUBundles/xemtl-allow.txt"' \
