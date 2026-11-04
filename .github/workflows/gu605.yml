@@ -219,11 +219,17 @@ jobs:
           [ -n "$XC" ] && sudo xcode-select -s "$XC/Contents/Developer"
           /usr/bin/pgrep -q oahd || sudo softwareupdate --install-rosetta --agree-to-license
           arch -x86_64 /usr/bin/uname -m; xcodebuild -version
+      # Mesa needs Python >= 3.10 that runs as x86_64 (meson takes the host from it): setup-python's x64 build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
       - name: Userland (Mesa ANV, libdrm, AIR bitcode reader), x86_64 under Rosetta
         id: userland
         continue-on-error: true
         run: |
           mkdir -p out
+          export XEGFX_PY=$pythonLocation/bin/python3; lipo -archs "$XEGFX_PY"
           arch -x86_64 /bin/bash gu605/ci/build_userland.sh "$PWD/out/userland" 2>&1 | tee out/userland.log
           test "${PIPESTATUS[0]}" = 0
       - uses: actions/upload-artifact@v4

@@ -52,9 +52,9 @@ sudo port -N install glslang cmake pkgconfig bison flex > /dev/null
 # and Mesa chose NEON code (runs 41894886487, 41899141435). A universal Python started from this shell runs x86_64.
 PY=python3
 if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
-  # Apple's /usr/bin/python3 is universal: from this translated shell it runs as x86_64 (MacPorts had no binary
-  # archive for python313, run 41903552294)
-  PY=/usr/bin/python3
+  # an x86_64 Python >= 3.10 (Mesa's minimum): the CI passes setup-python's x64 build as XEGFX_PY. Apple's
+  # /usr/bin/python3 runs x86_64 here but is 3.9 (run 41907002373); MacPorts had no python313 archive (41903552294)
+  PY=${XEGFX_PY:-/usr/bin/python3}
 fi
 rm -rf "$HOME/.venvs/mesa"; "$PY" -m venv "$HOME/.venvs/mesa"; "$HOME/.venvs/mesa/bin/pip" -q install meson ninja mako pyyaml packaging
 PYM=$("$HOME/.venvs/mesa/bin/python3" -c 'import platform; print(platform.machine())'); echo "meson python: $PYM"
