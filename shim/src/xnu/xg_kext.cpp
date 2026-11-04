@@ -76,6 +76,12 @@ extern unsigned long long xg_spin_max_us;
 extern unsigned int xg_spin_long;
 /* the firmware's console image, when pipe A scans it out at probe; i915's stolen allocator starts after it */
 unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
+/*
+ * GU605 branch, display path (docs/GU605-DISPLAY-DESIGN.md): -1 not a GU605 (the overlay keeps its tunables), 0 GU605
+ * with i915's display code off (the adopt path), 1 GU605 with i915 owning the display (KMS). Set before stage 4 and
+ * read by the overlay's display probe and stolen allocator.
+ */
+int xg_kms_on = -1;
 }
 
 class XeGfxResident : public IOService {
@@ -133,6 +139,9 @@ xg_env_has(const char *kv)
 }
 static IOLock *gStageLock;
 static uint64_t gSurfPte;
+static bool gKmsPre;		/* stage 2: the takeover conditions i915 needs all held */
+static char gKmsWhy[96];	/* why not, or "ok" */
+static void xg_kms_preflight(OSDictionary *d, volatile uint32_t *r, uint16_t ggc);
 static bool gPipeLit;	/* pipe A was scanning out at probe time (Hybrid); in Discrete mode the NVIDIA GPU has the panel */
 static char gLog[256 * 1024];	/* last 256 KiB of the shim's console output, for sysctl debug.xegfx_log */
 static size_t gLogLen;
@@ -385,6 +394,8 @@ xg_probe(void)
 					xg_boot_fb_size = (uint64_t)(r[0x70188 / 4] & 0x7ff) * 64 * ((r[0x70190 / 4] >> 16) + 1);
 					xg_put(d, "boot-fb-size", xg_boot_fb_size, 64);
 				}
+				if (xg_is_gu605(gpu))
+					xg_kms_preflight(d, r, gpu->configRead16(0x50));
 			}
 			mm->release();
 		} else {
@@ -419,6 +430,111 @@ out:
 
 static uint32_t gBootSurf;	/* PLANE_SURF_1_A after i915 ran: the boot surface's GGTT offset */
 
+/*
+ * GU605 display path: i915 can take the firmware's image over (intel_plane_initial.c, MTL: stolen-as-LMEM) only when
+ * pipe A scans a linear XRGB8888 surface whose GGTT entry is valid, has the LM bit and points inside stolen
+ * ([8 MiB, 8 MiB + GMS) in MTL's GSM-relative PTE addresses). When one of these does not hold, i915 would disable the
+ * plane at stage 4 (a black panel), so the display path is refused and the adopt path runs, in the same boot.
+ */
+static void
+xg_kms_preflight(OSDictionary *d, volatile uint32_t *r, uint16_t ggc)
+{
+	uint32_t ctl = r[0x70180 / 4], gms = (ggc >> 8) & 0xff, dsm_mb = 0;
+	uint64_t addr = gSurfPte & 0x3ffffffff000ull;
+	uint32_t f0 = r[0x70040 / 4], f1;
+
+	if (gms <= 4)
+		dsm_mb = gms * 32;
+	else if (gms >= 0xf0 && gms <= 0xfe)
+		dsm_mb = (gms - 0xf0 + 1) * 4;
+	IOSleep(40);
+	f1 = r[0x70040 / 4];
+	gKmsPre = false;
+	if (!gPipeLit)
+		strlcpy(gKmsWhy, "pipe A off (another GPU has the panel)", sizeof(gKmsWhy));
+	else if (f1 == f0)
+		strlcpy(gKmsWhy, "pipe A frame counter stopped", sizeof(gKmsWhy));
+	else if (!(ctl & 0x80000000u))
+		strlcpy(gKmsWhy, "plane 1A off", sizeof(gKmsWhy));
+	else if (ctl & 0x1c00u)
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "plane 1A tiled (ctl 0x%x)", ctl);
+	else if (((ctl >> 23) & 0x1f) != 8)
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "plane 1A format %u, not XRGB8888", (ctl >> 23) & 0x1f);
+	else if ((ggc & 0xc0) != 0xc0 || dsm_mb == 0)
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "GGC 0x%x: no valid GMS/GGMS", ggc);
+	else if (!(gSurfPte & 1))
+		strlcpy(gKmsWhy, "boot surface GGTT entry invalid", sizeof(gKmsWhy));
+	else if (!(gSurfPte & 2))
+		strlcpy(gKmsWhy, "boot surface GGTT entry without the LM bit", sizeof(gKmsWhy));
+	else if (addr < (8ull << 20) || addr + xg_boot_fb_size > (8ull << 20) + ((uint64_t)dsm_mb << 20))
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "boot surface 0x%llx+0x%llx outside stolen (%u MiB)",
+		    (unsigned long long)addr, (unsigned long long)xg_boot_fb_size, dsm_mb);
+	else {
+		gKmsPre = true;
+		strlcpy(gKmsWhy, "ok", sizeof(gKmsWhy));
+	}
+	xg_put(d, "kms-dsm-mb", dsm_mb);
+	if (OSString *s = OSString::withCString(gKmsWhy)) {
+		d->setObject("kms-preflight", s);
+		s->release();
+	}
+}
+
+/* stage 4 on a GU605: whether i915's display code runs this time (xg_kms_on), recorded as XeGfxKms */
+static void
+xg_env_default(const char *key, const char *val)
+{
+	char kv[96];
+
+	snprintf(kv, sizeof(kv), "%s=", key);
+	if (xg_env_has(kv))
+		return;
+	snprintf(kv, sizeof(kv), " %s=%s", key, val);
+	strlcat(xg_env, kv, sizeof(xg_env));
+}
+
+static void
+xg_kms_decide(void)
+{
+	IOPCIDevice *g = xg_find_igpu();
+	bool gu = xg_is_gu605(g);
+	const char *why = nullptr;
+	OSDictionary *d = OSDictionary::withCapacity(4);
+
+	OSSafeReleaseNULL(g);
+	if (!gu) {
+		xg_kms_on = -1;
+		return;
+	}
+	if (!xg_env_has("xegfx.kms=1"))
+		why = "not asked for (DISPLAY=kms in gu605.conf)";
+	else if (PE_parse_boot_argn("-xegfxnokms", nullptr, 0))
+		why = "boot-arg -xegfxnokms";
+	else if (!gKmsPre)
+		why = gKmsWhy[0] ? gKmsWhy : "stage 2 did not run";
+	xg_kms_on = why == nullptr ? 1 : 0;
+	if (xg_kms_on == 1) {
+		/* xeflip and the accelerator write the scanout behind i915's back: nothing may cache or skip frames */
+		xg_env_default("compat.linuxkpi.i915_disable_display", "0");
+		xg_env_default("compat.linuxkpi.i915_xegfx_no_display", "0");
+		xg_env_default("compat.linuxkpi.i915_enable_psr", "0");
+		xg_env_default("compat.linuxkpi.i915_enable_fbc", "0");
+		xg_env_default("compat.linuxkpi.i915_enable_dc", "0");
+	}
+	IOLog("XeGfx: display path: %s%s%s\n", xg_kms_on == 1 ? "i915 KMS" : "adopt (i915 display off)",
+	    why ? " -- " : "", why ? why : "");
+	if (d && gResident) {
+		OSString *s = OSString::withCString(why ? why : "ok");
+		xg_put(d, "on", (uint32_t)xg_kms_on, 8);
+		if (s) {
+			d->setObject("why", s);
+			s->release();
+		}
+		gResident->setProperty("XeGfxKms", d);
+	}
+	OSSafeReleaseNULL(d);
+}
+
 /* after i915 has run: the panel must still scan out the boot surface through the same GGTT entry, and pipe A must
  * still count frames; otherwise the desktop is black even though WindowServer looks fine */
 static int
@@ -447,6 +563,14 @@ xg_display_check(void)
 		xg_put(d, "ggtt-pte-surf", pte, 64);
 		xg_put(d, "frmcount-delta", f1 - f0);
 		rc = (gSurfPte && pte != gSurfPte) ? -71 : (f1 == f0 ? -70 : 1);
+		/* KMS: i915 rebinds the surface (MTL: at GGTT 0); the panel must still show the same stolen pages */
+		if (xg_kms_on == 1) {
+			uint32_t ctl = r[0x70180 / 4];
+			rc = !(ctl & 0x80000000u) ? -72 :
+			    ((pte & 0x3ffffffff000ull) != (gSurfPte & 0x3ffffffff000ull) || !(pte & 1)) ? -73 : (f1 == f0 ? -70 : 1);
+			xg_put(d, "kms", 1, 8);
+			xg_put(d, "plane-ctl-1-a", ctl);
+		}
 		xg_put(d, "result", (uint32_t)rc);
 		if (gResident)
 			gResident->setProperty("XeGfxPost", d);
@@ -590,6 +714,8 @@ xg_run_stage(int s)
 	if (s == 2) {
 		rc = xg_probe();
 	} else {
+		if (s == 4)
+			xg_kms_decide();	/* before i915 probes: its display code reads xg_kms_on */
 		xg_start_stage(s);
 		if (s == 1 && xg_vm_vmap_selftest() != 0)
 			rc = -12;	/* the vmap path i915 needs from its first GGTT setup on (N-221) */
@@ -610,7 +736,8 @@ xg_run_stage(int s)
 				xg_i915_map_init();
 				rc = xg_gt_check();
 			}
-			if (rc == 1 && gPipeLit && gBootSurf && xg_boot_fb_size) {
+			/* KMS: i915 holds the surface itself (intel_plane_initial), nothing to reserve or move */
+			if (rc == 1 && xg_kms_on != 1 && gPipeLit && gBootSurf && xg_boot_fb_size) {
 				int err = xg_i915_reserve_bootfb(gBootSurf, xg_boot_fb_size);
 
 				IOLog("XeGfx: boot surface GGTT 0x%x + %llu reserved: %d\n", gBootSurf, xg_boot_fb_size, err);

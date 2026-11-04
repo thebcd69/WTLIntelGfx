@@ -1609,11 +1609,19 @@ static void display_platforms_or(struct intel_display_platforms *dst,
  * (it still probes every connector, N-223), so this tunable sends the probe down i915's own no-display path.
  * compat.linuxkpi.i915_xegfx_no_display=0 lets the display code run.
  */
+extern int xg_kms_on;	/* XeGfx.kext, GU605 branch: -1 not a GU605, 0 display off, 1 i915 owns the display */
+
 static bool
 xegfx_no_display(void)
 {
 	int v = 1;
 
+	/* GU605: the kext decided (gu605.conf DISPLAY=kms, -xegfxnokms, stage 2's takeover preflight); the tunable alone
+	 * never turns the display code on there */
+	if (xg_kms_on == 0)
+		return true;
+	if (xg_kms_on == 1)
+		return false;
 	getenv_int("compat.linuxkpi.i915_xegfx_no_display", &v);
 	return v != 0;
 }
