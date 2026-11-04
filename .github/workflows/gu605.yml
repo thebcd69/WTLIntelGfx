@@ -190,7 +190,18 @@ jobs:
           NOTE=""
           if [ -f art/xegfx-out/XeGfx.kext/Contents/MacOS/XeGfx ]; then
             ditto art/xegfx-out/XeGfx.kext "$P/EFI/OC/Kexts/XeGfx.kext"; cp art/xegfx-out/FIRMWARE.txt "$P/"
-          else NOTE="$NOTE XeGfx.kext missing (Intel runner job: ${{ needs.intel.result }})."; fi
+          else
+            # fallback: upstream's v0.0.47 release kext (samwu07 ran it unmodified on 7D55), checked against the SHA-256
+            # its release notes publish. It lacks this branch's kernel-side additions (-xegfxoff, the Type-C dump); the
+            # scripts' own GuC-slot and no-rerun checks still apply.
+            U=https://github.com/watchthelight-labs/WTLIntelGfx/releases/download/v0.0.47/XeGfx-0.0.47.zip
+            if curl -fsSL --retry 3 -o /tmp/up.zip "$U" && [ "$(shasum -a 256 /tmp/up.zip | cut -d' ' -f1)" = 222ca676325d86bc5e7a06dc67478360651a8afb234f35e3dcef82b886ca60c0 ]; then
+              mkdir -p /tmp/up && ditto -x -k /tmp/up.zip /tmp/up
+              K=$(find /tmp/up -type d -name XeGfx.kext | head -1)
+              if [ -n "$K" ]; then ditto "$K" "$P/EFI/OC/Kexts/XeGfx.kext"; NOTE="$NOTE XeGfx.kext is upstream v0.0.47 (Intel runner job: ${{ needs.intel.result }})."
+              else NOTE="$NOTE XeGfx.kext missing (no kext in the upstream zip)."; fi
+            else NOTE="$NOTE XeGfx.kext missing (Intel runner job: ${{ needs.intel.result }}, upstream zip unavailable or checksum mismatch)."; fi
+          fi
           if [ -f art/userland-out/libvulkan_intel.dylib ]; then ditto art/userland-out "$P/userland"
           else NOTE="$NOTE Mesa ANV missing (the runner stops after stage 6)."; fi
           cp gu605/scripts/* "$P/scripts/"; cp gu605/launchd/* "$P/launchd/"; chmod 755 "$P/scripts/"*.sh
