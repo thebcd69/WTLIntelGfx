@@ -206,3 +206,24 @@ gu605-mtl'deki DPCD yolunu. Kaydedilen seviye ve %5 alt sınır korunur. Ultimat
 
 Bu daldaki yeni dosyalar WTL'nin lisansıyla (BSD-2) yazıldı; değiştirilen drm-kmod dosyaları kendi lisanslarında
 (MIT) kalır. NullMoth (PolyForm-Noncommercial) yalnız tasarım referansıdır, kodundan satır alınmadı.
+
+## 12. NullMoth'tan alınanlar (sahip kararı: kişisel, ticari olmayan kullanım)
+
+Sahip NullMoth 2.7.1 kodunun kopyalanmasına/uyarlanmasına izin verdi. Kural (PolyForm-NC "Notices"): NullMoth kodu
+içeren her dosya NullMoth telif/lisans satırını ve `Required Notice:` satırını taşır, başlığında PolyForm-NC yazar,
+`NOTICE`'ta listelenir; hiçbiri BSD-2'ye çevrilmez. §11'deki "kod alınmadı" yalnız o dosyalar için geçerlidir:
+`xg_kms.c`, `xg_kms.h`, `kms.inc` bağımsız yazıldı (BSD-2).
+
+| Dosya | Kaynak | Ne |
+|---|---|---|
+| `kexts/XeGfxIntelFB/nm_backlight.h` (PolyForm-NC) | NVRMFB `NVRMBacklightHandler`, `nvrm_off.h` | 0..65535 mantıksal parlaklık, %5 taban (afin), CoreDisplay probe çifti, kullanıcı/güç isteği ayrımı, hedefin 2 sn sonra NVRAM `xegfx-backlight`'a kaydı ve açılışta geri yüklenmesi (NullMoth'un `nullmoth-backlight`'ına dokunulmaz) |
+| `gu605/scripts/gu605-install.sh` (yöntem) | NullMoth `package/install.sh` | yardımcı KC'yi tüm `/Library/Extensions`'tan kurmak, kimlikleri kmutil metninde aramak (kod değil, yöntem) |
+
+İncelenen, şimdilik alınmayanlar:
+* **NVAccel**: WTL'nin XeGfxAccel'i zaten NullMoth NVAccel'in (NvGfx fork) devamı; sysctl/sayaç kümesi 2.7.1'inkinin
+  üst kümesi (`iop_flip` dahil). Intel panelde 240 fps'in önündeki engel kopya yolu (kare başına 16 MiB CPU kopyası +
+  tarama satırı beklemesi): çözüm xeflip sıfır-kopya flip + gerçek 240 Hz VBL (D4'te yapıldı).
+* **Uyku/uyanma** (`docs/SLEEP-WAKE.md`): IOGraphics uyanma işi (DidWake/DidPowerOn, pagingState) NullMoth'ta NVRMFB
+  için var, NMIntelFB için yok; i915'in XNU'da suspend/resume'u da yok → ayrı iş (D7). Şimdilik testte uyku yok.
+* **Hotplug yaşam döngüsü** (`NVRMFB-HOTPLUG-LIFECYCLE.md`): connect kesmesini display gate dışında, bir kez
+  ateşlemek kms.inc'te aynı biçimde yapılıyor (thread call).
