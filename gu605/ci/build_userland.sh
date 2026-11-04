@@ -28,7 +28,7 @@ if [ ! -x $MP/bin/port ]; then
     rm -f /tmp/macports.pkg
     curl -fsSL --retry 3 -o /tmp/macports.pkg "$u" 2>/dev/null || { echo "MacPorts pkg: $u not available"; continue; }
     sig=$(pkgutil --check-signature /tmp/macports.pkg 2>&1 || true)
-    if printf '%s\n' "$sig" | grep -q 'Developer ID Installer: The MacPorts Project'; then got=$u; break; fi
+    if printf '%s\n' "$sig" | grep -qE 'Developer ID Installer: .*\(QTA3A3B7F3\)'; then got=$u; break; fi
     echo "MacPorts pkg: $u signature not accepted:"; printf '%s\n' "$sig" | head -8
   done
   [ -n "$got" ] || { echo "MacPorts pkg signature: no signed MacPorts installer for $MPOS"; exit 1; }
