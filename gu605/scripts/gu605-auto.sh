@@ -28,7 +28,8 @@ MODE=$(gpu_mode)
 say "mode: $MODE (iGPU framebuffer $(igpu_fb_present), NVIDIA display device $(pci_display_present 10de))"
 { echo "== kexts"; kmutil showloaded --list-only 2>/dev/null | grep -E 'watchthelight|org\.local|nullmoth|thebcd69|NVPrimarySelector'
   echo "== XeGfxIntelFramebuffer"; ioreg -l -w0 -r -c XeGfxIntelFramebuffer -d 2 2>/dev/null | grep -E 'XeGfxIntelFramebuffer|IOFBDependent|NVRMTiming|display0|IOFBCurrentPixelCount|backlight' | head -20
-  echo "== iGPU"; ioreg -l -w0 -r -n GFX0 -d 1 2>/dev/null | grep -E '"device-id"|"class-code"|"model"|xgfbmove|VRAM' | head
+  # WhateverGreen renames GFX0 to IGPU once disable-gpu is gone: look for both
+  echo "== iGPU"; for n in GFX0 IGPU; do ioreg -l -w0 -r -n "$n" -d 1 2>/dev/null | grep -E '\+-o|"device-id"|"class-code"|"model"|xgfbmove|VRAM|"IOName"' | head -12; done
   echo "== kernel (XeGfxIntelFB, XgFbMove)"; log show --last boot --style compact --predicate 'process == "kernel" AND (eventMessage CONTAINS "XeGfxIntelFB" OR eventMessage CONTAINS "XgFbMove")' 2>/dev/null | tail -60
 } > "$R/boot-state.txt" 2>&1
 cat "$R/boot-state.txt" >> "$S"
