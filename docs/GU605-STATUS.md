@@ -22,8 +22,10 @@ NullMoth **2.7.1**. Öncelik sırası (sahip, 2026-11-04): **1) Eco: dahili pane
 - CI: `.github/workflows/gu605.yml` (macos-15-intel), prerelease `gu605-<sha>`.
 
 ## Devam ediyor
-- İlk CI derlemesi (XeGfx çekirdeği bağımlılıkları: drm-kmod c16de0f, freebsd d2145e9, kcabi, OGKM 615.78.08).
-- Mesa ANV + libdrm (userland) CI işi: henüz yok → paket şimdilik Metal/masaüstü adımına kadar gidemez (aşama 6'da durur).
+- İlk CI derlemesi (XeGfx çekirdeği bağımlılıkları: drm-kmod c16de0f, freebsd d2145e9, kcabi, OGKM 615.78.08) ve
+  userland adımı (Mesa ANV + libdrm + AIR okuyucu, MacPorts LLVM 20; başarısız olursa paket onsuz çıkar ve koşucu
+  aşama 6'da durur).
+- WhateverGreen, `disable-gpu` kalkınca GFX0'ı IGPU yapar: 7D55 framebuffer kişiliği yalnız PCI kimliğiyle eşleşir.
 
 ## Sıradaki adım
 1. CI'yi yeşile çek; firmware hash'lerini `gu605/firmware.lock`'a sabitle.
