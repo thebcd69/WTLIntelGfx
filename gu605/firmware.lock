@@ -1,0 +1,9 @@
+# linux-firmware files the GU605 build needs (GitLab kernel-firmware/linux-firmware, LICENSE.i915: redistributable in
+# binary form with the licence). ref: a tag or commit; "latest" resolves to the newest tag and is only for bootstrapping
+# (the CI log prints the values to pin here). sha256 "-" = not pinned yet (warning, not an error).
+# Only the GuC is linked into XeGfx.kext. DMC is fetched and checked for stage 3 (i915 display on, external USB-C);
+# HuC/GSC are not used: MTL's HuC is authenticated through the GSC, whose proxy needs MEI, which macOS does not have.
+ref latest
+i915/mtl_guc_70.bin -
+i915/mtl_dmc.bin -
+LICENSE.i915 -

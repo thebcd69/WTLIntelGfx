@@ -1,0 +1,11 @@
+# /Library/XeGfx/gu605/gu605.conf: what the boot-time runner (gu605-auto.sh) may do. Levels:
+#   off | probe (read-only stages 1-2) | gt (stages to 6: i915, GuC, engines) | metal (to 7 + Metal test in a test
+#   process) | desktop (metal + WindowServer on the Intel GPU, at the login window)
+ECO_LEVEL=desktop
+STANDARD_LEVEL=probe
+# zero-copy flip after a confirmed desktop (samwu07), WindowServer completion marks, AGDC K5 link answers
+FLIP=1
+WSMARK=1
+K5=1
+# copy each run's summary to <EFI>/GU605/ (readable from Windows); 0 = never mount the EFI
+EFI_LOG=1

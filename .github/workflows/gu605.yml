@@ -1,0 +1,140 @@
+# GU605 branch (ASUS ROG Zephyrus G16 GU605MY, Meteor Lake iGPU 8086:7D55, macOS 15 Sequoia): builds every kext and
+# the Intel Metal plugin bundle, packs them with the GU605 scripts and publishes a prerelease gu605-<shortsha>.
+# Intel x86_64 runner: the kext link checks read the x86_64 kernel collection of the runner's own macOS.
+name: gu605
+on:
+  push:
+    branches: [gu605-mtl]
+  workflow_dispatch:
+    inputs:
+      firmware_ref:
+        description: "linux-firmware tag or commit (empty = the one pinned in gu605/firmware.lock)"
+        required: false
+        default: ""
+permissions:
+  contents: write
+concurrency:
+  group: gu605-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  DRM_KMOD_REV: c16de0f9fa84f70b9551f69fde837a7f3a73c0e9   # README: drm-kmod c16de0f (Linux 6.14 level)
+  FREEBSD_REV: d2145e9                                      # xkpi/NOTICE.md: freebsd-src d2145e9
+  KCABI_REV: cea28a5297633118177cee6a75e86d8bc57f1960        # watchthelight-labs/WTLKcAbi
+  OGKM_TAG: 615.78.08                                       # NVIDIA open-gpu-kernel-modules (accelerator headers)
+  VK_TAG: v1.4.328                                          # Khronos Vulkan-Headers (plugin)
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers; uname -m; xcodebuild -version || true
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          xcrun --sdk macosx --show-sdk-path; xcrun clang --version | head -1
+          python3 --version; (rustup --version && cargo --version) || true
+      - name: Sources (drm-kmod, FreeBSD, kcabi, NVIDIA headers, Vulkan headers)
+        run: |
+          set -euo pipefail
+          S=$HOME/src/xe-src; mkdir -p "$S" "$HOME/src/deps"
+          git init -q "$S/drm-kmod"; git -C "$S/drm-kmod" remote add origin https://github.com/freebsd/drm-kmod.git
+          git -C "$S/drm-kmod" fetch -q --depth 1 origin "$DRM_KMOD_REV"; git -C "$S/drm-kmod" checkout -q FETCH_HEAD
+          git clone -q --filter=tree:0 --no-checkout https://github.com/freebsd/freebsd-src.git "$S/freebsd"
+          git -C "$S/freebsd" sparse-checkout set --cone sys/compat/linuxkpi sys/sys sys/vm sys/amd64/include sys/x86/include \
+            sys/kern sys/contrib/ck sys/dev/pci sys/net sys/netinet sys/crypto sys/machine sys/libkern sys/bsm sys/security sys/geom
+          git -C "$S/freebsd" checkout -q "$FREEBSD_REV"
+          git -C "$S/freebsd" log -1 --format='freebsd %H %cd'
+          git -C "$S/drm-kmod" log -1 --format='drm-kmod %H %cd'
+          git clone -q https://github.com/watchthelight-labs/WTLKcAbi.git "$HOME/src/kcabi"; git -C "$HOME/src/kcabi" checkout -q "$KCABI_REV"
+          curl -fsSL --retry 3 -o /tmp/ogkm.tgz "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/$OGKM_TAG.tar.gz"
+          tar -xzf /tmp/ogkm.tgz -C "$HOME/src/deps"; mv "$HOME/src/deps/open-gpu-kernel-modules-$OGKM_TAG" "$HOME/src/deps/open-gpu-$OGKM_TAG"
+          git clone -q --depth 1 --branch "$VK_TAG" https://github.com/KhronosGroup/Vulkan-Headers.git "$HOME/src/deps/Vulkan-Headers"
+      - name: Firmware (linux-firmware i915, SHA-256 checked)
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.firmware_ref }}"
+          python3 -I gu605/tools/fetch_firmware.py --lock gu605/firmware.lock --out "$HOME/src/xe-src/linux-firmware" ${REF:+--ref "$REF"}
+      - name: XeGfx.kext (drm, TTM, i915, LinuxKPI on XNU)
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          export XEGFX_FW=$HOME/src/xe-src/linux-firmware
+          bash build/build_xegfx.sh 2>&1 | tee out/build-xegfx.log
+          test -f out/XeGfx.kext/Contents/MacOS/XeGfx
+      - name: Kexts (XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove)
+        run: |
+          set -euo pipefail
+          export OUTROOT=$PWD/out/kexts OGKM=$HOME/src/deps/open-gpu-$OGKM_TAG
+          bash build/build_xegfxintelfb.sh
+          bash build/build_gu605_accel.sh
+          bash build/build_xegfxagdc.sh
+          bash build/build_xgfbmove.sh
+      - name: Translator (Metal AIR to SPIR-V) and XeMTLDriver.bundle
+        run: |
+          set -euo pipefail
+          export XEGFX_OUT=$PWD/out XEGFX_DEPS=$HOME/src/deps NVGFX_REF_PKGROOT=$PWD/out/xlate
+          mkdir -p out/xlate
+          bash build/build_xlate.sh || echo "::warning::translator build failed; the bundle ships without it"
+          XLATE=$PWD/out/xlate/libnvmtl_translate.dylib RELEASE= bash build/build_gu605_plugin.sh
+      - name: mtlprobe (Metal test tool the runner uses)
+        run: |
+          set -euo pipefail
+          mkdir -p out/tools
+          xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework IOKit \
+            userland/tools/mtlprobe.m -o out/tools/mtlprobe
+      - name: Host tests (XgFbMove relocation core, scripts)
+        run: |
+          set -euo pipefail
+          mkdir -p kexts/XgFbMove/out
+          clang -shared -fPIC -O2 '-D__declspec(x)=' -o kexts/XgFbMove/out/fbr_test.so kexts/XgFbMove/fbr_test_dll.c
+          python3 -I kexts/XgFbMove/test_fbreloc.py
+          for f in gu605/scripts/*.sh; do bash -n "$f"; done
+          plutil -lint gu605/launchd/*.plist
+      - name: Package
+        id: pack
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse --short HEAD); P=out/pkg/gu605-$SHA; echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          mkdir -p "$P/EFI/OC/Kexts" "$P/Library/Extensions" "$P/Library/GPUBundles" "$P/scripts" "$P/launchd" "$P/docs" "$P/tools"
+          cp out/tools/mtlprobe "$P/tools/"
+          ditto out/XeGfx.kext "$P/EFI/OC/Kexts/XeGfx.kext"
+          for k in XeGfxIntelFB/XeGfxIntelFB XeGfxAccel/15/XeGfxAccel XeGfxAGDC/XeGfxAGDC XgFbMove/XgFbMove; do
+            ditto "out/kexts/$k.kext" "$P/Library/Extensions/$(basename "$k").kext"; done
+          ditto out/plugin-gu605/XeMTLDriver.bundle "$P/Library/GPUBundles/XeMTLDriver.bundle"
+          cp gu605/scripts/* "$P/scripts/"; cp gu605/launchd/* "$P/launchd/"
+          cp docs/GU605-*.md docs/IGPU-FEASIBILITY.md "$P/docs/" 2>/dev/null || true
+          cp LICENSE NOTICE "$P/"; cp -R licenses "$P/licenses"
+          cp "$HOME/src/xe-src/linux-firmware/FIRMWARE.txt" "$P/FIRMWARE.txt"
+          { echo "branch gu605-mtl commit $(git rev-parse HEAD)"; sw_vers; xcrun clang --version | head -1
+            echo "drm-kmod $DRM_KMOD_REV freebsd $FREEBSD_REV kcabi $KCABI_REV ogkm $OGKM_TAG vk $VK_TAG"
+            grep -h -E '^(XeGfx|XeGfxIntelFB|XgFbMove|XeMTLDriver|15 )' out/*.log 2>/dev/null || true; } > "$P/BUILDINFO.txt"
+          (cd "$P" && find . -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS)
+          (cd out/pkg && ditto -c -k --keepParent "gu605-$SHA" "gu605-$SHA.zip")
+          ls -la out/pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gu605-${{ steps.pack.outputs.sha }}
+          path: out/pkg/gu605-${{ steps.pack.outputs.sha }}.zip
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gu605-logs-${{ github.run_number }}
+          path: |
+            out/*.log
+            out/*.txt
+            out/link/ld.txt
+            out/kexts/**/*.err
+            out/plugin-gu605/*.err
+            out/xlate/cargo.log
+          if-no-files-found: ignore
+      - name: Prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA=${{ steps.pack.outputs.sha }}; T=gu605-$SHA
+          gh release view "$T" >/dev/null 2>&1 && { echo "release $T exists"; exit 0; }
+          gh release create "$T" "out/pkg/$T.zip" --prerelease --target "$(git rev-parse HEAD)" --title "$T (GU605 test build)" \
+            --notes "Untested test build of branch gu605-mtl at $(git rev-parse HEAD). Kurulum: docs/GU605-KURULUM.md, test: docs/GU605-TEST.md. SHA256SUMS inside the zip."
