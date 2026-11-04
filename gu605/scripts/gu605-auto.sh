@@ -48,6 +48,7 @@ fi
 case "$LEVEL" in probe) T=2 ;; gt) T=6 ;; metal|desktop) T=7 ;; *) finish "unknown level $LEVEL" ;; esac
 # stages 1-2 are read-only; from 3 on a hang is possible, so the pending mark goes first
 bash "$G/gu605-stages.sh" 2 "$R/stages" || finish "stages 1-2 failed (see stages/)"
+{ echo "== display as the firmware left it (stage 2)"; cat "$R/stages/display-decoded.txt" 2>/dev/null; } >> "$S"
 [ $T -le 2 ] && finish "probe done"
 nvram gu605-pending=1; sync
 if ! bash "$G/gu605-stages.sh" "$T" "$R/stages"; then nvram gu605-pending=0; finish "stages to $T failed (see stages/)"; fi

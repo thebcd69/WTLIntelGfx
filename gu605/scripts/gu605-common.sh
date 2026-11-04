@@ -70,3 +70,25 @@ efi_copy() {
   [ $was = 1 ] || diskutil unmount "$id" > /dev/null 2>&1
   sync
 }
+
+# probe_decode <ioreg XeGfxResident dump>: the GU605 stage 2 display dump in words (which pipes the firmware lit,
+# which DDIs are on, which Type-C port sees a monitor in DP-alt or TBT mode)
+probe_decode() {
+  local f=$1 k v
+  pk() { sed -nE "s/.*\"$1\"=([0-9]+).*/\1/p" "$f" | head -1; }
+  [ -n "$(pk transconf-A)" ] || { echo "no GU605 display dump in $f"; return 0; }
+  for t in A B C D; do
+    v=$(pk "transconf-$t"); p=$(pk "plane-ctl-1-$t"); s=$(pk "plane-size-1-$t"); u=$(pk "plane-surf-1-$t"); d=$(pk "trans-ddi-func-ctl-$t")
+    [ -n "$v" ] || continue
+    printf 'pipe %s: transcoder %s, plane %s, %dx%d, surface GGTT 0x%08X, DDI func 0x%08X (DDI select %d: 1=A eDP, 2=B, 4-7=TC1-TC4)\n' "$t" \
+      "$([ $((v & 0x80000000)) -ne 0 ] && echo on || echo off)" "$([ $((p & 0x80000000)) -ne 0 ] && echo on || echo off)" \
+      $(( (s & 0xFFFF) + 1 )) $(( ((s >> 16) & 0xFFFF) + 1 )) $((u & 0xFFFFF000)) "$d" $(( (d >> 27) & 0xF ))
+  done
+  for k in a b tc1 tc2 tc3 tc4; do v=$(pk "ddi-buf-ctl-$k"); [ -n "$v" ] && printf 'DDI %s buffer %s (0x%08X)\n' "$k" "$([ $((v & 0x80000000)) -ne 0 ] && echo ON || echo off)" "$v"; done
+  for n in 1 2 3 4; do
+    v=$(pk "tcss-ddi-status-tc$n"); b=$(pk "port-buf-ctl1-tc$n"); [ -n "$v" ] || continue
+    printf 'TC%d: HPD DP-alt %d, HPD TBT %d, ready %d, pin assignment %d; PHY ownership %d, TCSS power req %d state %d (status 0x%08X buf 0x%08X)\n' \
+      "$n" $((v & 1)) $(((v >> 1) & 1)) $(((v >> 2) & 1)) $(((v >> 25) & 0xF)) $(((b >> 6) & 1)) $(((b >> 5) & 1)) $(((b >> 4) & 1)) "$v" "$b"
+  done
+  v=$(pk blc-pwm-ctl); [ -n "$v" ] && printf 'south PWM backlight: ctl 0x%08X freq %s duty %s\n' "$v" "$(pk blc-pwm-freq)" "$(pk blc-pwm-duty)"
+}

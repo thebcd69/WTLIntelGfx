@@ -64,6 +64,7 @@ for s in $(seq 1 "$TARGET"); do
     say "stage $s FAILED: result ${R[$s]:-?}"; tail -30 "$OUT/stage$s-xegfx-log.txt" >> "$OUT/stages.log"; exit 1
   fi
   say "stage $s passed"
+  [ "$s" = 2 ] && { probe_decode "$OUT/stage2-ioreg-XeGfxResident.txt" > "$OUT/display-decoded.txt" 2>&1; cat "$OUT/display-decoded.txt" >> "$OUT/stages.log"; }
 done
 [ "$TARGET" = 7 ] && { ioreg -l -w0 -r -c NMXAccel > "$OUT/ioreg-NMXAccel.txt" 2>&1
   [ "$(grep -c NMXAccel "$OUT/ioreg-NMXAccel.txt")" -gt 0 ] && say "XeGfxAccel attached (NMXAccel)" || { say "no NMXAccel after stage 7"; exit 1; }; }
