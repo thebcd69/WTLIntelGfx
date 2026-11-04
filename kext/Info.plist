@@ -49,5 +49,7 @@
 		<key>com.apple.kpi.unsupported</key>
 		<string>8.0</string>
 	</dict>
+	<key>XeGfxBranch</key>
+	<string>gu605-mtl</string>
 </dict>
 </plist>

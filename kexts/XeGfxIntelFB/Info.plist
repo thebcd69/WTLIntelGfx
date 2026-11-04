@@ -13,9 +13,9 @@
 	<key>CFBundlePackageType</key>
 	<string>KEXT</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.9.4.1</string>
+	<string>0.9.5</string>
 	<key>CFBundleVersion</key>
-	<string>0.9.4.1</string>
+	<string>0.9.5</string>
 	<key>IOKitPersonalities</key>
 	<dict>
 		<key>XeGfxIntelFramebuffer</key>
@@ -53,5 +53,7 @@
 	</dict>
 	<key>OSBundleRequired</key>
 	<string>Root</string>
+	<key>XeGfxBranch</key>
+	<string>gu605-mtl</string>
 </dict>
 </plist>

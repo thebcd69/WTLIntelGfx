@@ -17,6 +17,7 @@
 #include <libkern/c++/OSDictionary.h>
 #include <libkern/c++/OSNumber.h>
 #include <mach/kmod.h>
+#include <pexpert/pexpert.h>
 #include <sys/errno.h>
 #include <sys/sysctl.h>
 #include <string.h>
@@ -87,6 +88,7 @@ public:
 static XeGfxResident *gResident;
 static int gStage;	/* highest stage done */
 static int gRunning;	/* stage in progress, 0 when idle */
+static bool gIdleOff;	/* GU605 branch: -xegfxoff, nothing set up */
 static int gResult[8];	/* per stage: 0 not run, 1 pass, negative errno-style failure */
 static int gWdog = 60;
 static thread_call_t gWdogCall;
@@ -226,6 +228,59 @@ xg_find_igpu(void)
 	return gpu ? gpu : xg_find_pci(0x8086, 0x03, 0x80);
 }
 
+/*
+ * GU605 branch (ASUS ROG Zephyrus G16 GU605MY, iGPU 8086:7D55): extra safety and read-only diagnostics, only for that
+ * device ID. -xegfxoff (boot-arg) keeps the kext from arming at all.
+ */
+static bool
+xg_is_gu605(IOPCIDevice *gpu)
+{
+	return gpu && gpu->configRead16(kIOPCIConfigVendorID) == 0x8086 && gpu->configRead16(kIOPCIConfigDeviceID) == 0x7d55;
+}
+
+/*
+ * Display engine state as the firmware left it, read-only (display version 14, Linux i915 register layout, MIT):
+ * every transcoder and plane 1 (which outputs the GOP lit), every DDI buffer, and for the four Type-C ports the TCSS
+ * status (HPD live in DP-alt and TBT mode, pin assignment, ready) and the PHY ownership bits. With a monitor on the
+ * left USB-C port this names the TC port it is wired to. xegfx.tcprobe=0 in debug.xegfx_env skips it.
+ */
+static void
+xg_probe_gu605_display(OSDictionary *d, volatile uint32_t *r)
+{
+	char k[40];
+	static const char tr[] = "ABCD";
+	for (int t = 0; t < 4; t++) {
+		snprintf(k, sizeof(k), "transconf-%c", tr[t]);			xg_put(d, k, r[(0x70008 + t * 0x1000) / 4]);
+		snprintf(k, sizeof(k), "trans-ddi-func-ctl-%c", tr[t]);		xg_put(d, k, r[(0x60400 + t * 0x1000) / 4]);
+		snprintf(k, sizeof(k), "htotal-%c", tr[t]);			xg_put(d, k, r[(0x60000 + t * 0x1000) / 4]);
+		snprintf(k, sizeof(k), "vtotal-%c", tr[t]);			xg_put(d, k, r[(0x6000c + t * 0x1000) / 4]);
+		snprintf(k, sizeof(k), "plane-ctl-1-%c", tr[t]);		xg_put(d, k, r[(0x70180 + t * 0x1000) / 4]);
+		snprintf(k, sizeof(k), "plane-size-1-%c", tr[t]);		xg_put(d, k, r[(0x70190 + t * 0x1000) / 4]);
+		snprintf(k, sizeof(k), "plane-surf-1-%c", tr[t]);		xg_put(d, k, r[(0x7019c + t * 0x1000) / 4]);
+	}
+	/* DDI_BUF_CTL: port A 0x64000, B 0x64100, TC1..TC4 are ports D..G (0x64300..0x64600) */
+	static const struct { const char *n; uint32_t off; } ddi[] = {
+		{ "a", 0x64000 }, { "b", 0x64100 }, { "tc1", 0x64300 }, { "tc2", 0x64400 }, { "tc3", 0x64500 }, { "tc4", 0x64600 },
+	};
+	for (auto &e : ddi) {
+		snprintf(k, sizeof(k), "ddi-buf-ctl-%s", e.n);
+		xg_put(d, k, r[e.off / 4]);
+	}
+	for (int tc = 0; tc < 4; tc++) {
+		/* TCSS_DDI_STATUS(tc) 0x161500 + 4*tc: bit 0 HPD live (DP alt), bit 1 HPD live (TBT), bit 2 ready, 28:25 pins */
+		snprintf(k, sizeof(k), "tcss-ddi-status-tc%d", tc + 1);		xg_put(d, k, r[(0x161500 + tc * 4) / 4]);
+		/* XELPDP_PORT_BUF_CTL1 for USBC1..4 at 0x16f200 + 0x200*tc: bit 6 TC PHY ownership, 5 TCSS power request,
+		 * 4 TCSS power state, 3:1 port width */
+		snprintf(k, sizeof(k), "port-buf-ctl1-tc%d", tc + 1);		xg_put(d, k, r[(0x16f200 + tc * 0x200) / 4]);
+	}
+	xg_put(d, "port-buf-ctl1-a", r[0x64004 / 4]);
+	xg_put(d, "port-buf-ctl1-b", r[0x64104 / 4]);
+	/* south display PWM, in case the firmware drives the panel's backlight that way after all */
+	xg_put(d, "blc-pwm-ctl", r[0xc8250 / 4]);
+	xg_put(d, "blc-pwm-freq", r[0xc8254 / 4]);
+	xg_put(d, "blc-pwm-duty", r[0xc8258 / 4]);
+}
+
 static int
 xg_probe(void)
 {
@@ -271,6 +326,11 @@ xg_probe(void)
 				xg_put(d, e.k, r[e.off / 4]);
 			gPipeLit = (r[0x70008 / 4] & 0x80000000u) != 0;
 			xg_put(d, "pipe-a-lit", gPipeLit, 8);
+			if (xg_is_gu605(gpu) && !xg_env_has("xegfx.tcprobe=0") && mm->getLength() >= 0x170000) {
+				xg_progress = 25;
+				xg_put(d, "gu605", 1, 8);
+				xg_probe_gu605_display(d, r);
+			}
 			if (mm->getLength() >= 16ull << 20) {
 				uint32_t surf = r[0x7019c / 4] & ~0xfffu;
 				volatile uint64_t *gtt = (volatile uint64_t *)(mm->getVirtualAddress() + (8ull << 20));
@@ -514,6 +574,12 @@ xg_run_stage(int s)
 				/* -ENOSPC at or above GUC_GGTT_TOP is i915's own GuC-top reservation, which keeps it free (N-256) */
 				if (err == -28 && gBootSurf < 0xfee00000u)
 					rc = -28;	/* something else sits there: compositing into it would overwrite it */
+				/* GU605: a surface that starts inside the GuC slot [0xFEE00000, 0xFF000000) shows the GuC image as a
+				 * band (WTL issue #13); XgFbMove must have moved it before stage 4 */
+				IOPCIDevice *g4 = xg_find_igpu();
+				if (rc == 1 && xg_is_gu605(g4) && gBootSurf >= 0xfee00000u && gBootSurf < 0xff000000u)
+					rc = -28;
+				OSSafeReleaseNULL(g4);
 			}
 		}
 	}
@@ -544,6 +610,18 @@ xegfx_stage_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
 	if (v < 0 || v > 7)
 		return EINVAL;
 	IOLockLock(gStageLock);
+	/* GU605: a stage that failed this boot is never run again (a second stage 4 attaches another i915 on top, as
+	 * samwu07 saw on the same iGPU); restart instead */
+	if (gStage < v && gResult[gStage + 1] < 0) {
+		IOPCIDevice *g = xg_find_igpu();
+		bool gu = xg_is_gu605(g);
+		OSSafeReleaseNULL(g);
+		if (gu) {
+			IOLockUnlock(gStageLock);
+			IOLog("XeGfx: stage %d failed earlier this boot (%d): not run again, restart first\n", gStage + 1, gResult[gStage + 1]);
+			return EBUSY;
+		}
+	}
 	while (gStage < v) {
 		int s = gStage + 1, rc = xg_run_stage(s);
 		gResult[s] = rc;
@@ -925,6 +1003,12 @@ extern "C" kern_return_t
 _start(kmod_info_t *ki, void *)
 {
 	gKextBase = ki ? ki->address : 0;
+	/* GU605 branch: -xegfxoff loads the kext fully idle: no sysctls, no XeGfxArm, so no stage can run this boot */
+	if (PE_parse_boot_argn("-xegfxoff", nullptr, 0)) {
+		IOLog("XeGfx: -xegfxoff: staying idle this boot\n");
+		gIdleOff = true;
+		return KERN_SUCCESS;
+	}
 	gIrqoffCall = thread_call_allocate(xg_irqoff_check, nullptr);
 	gStageLock = IOLockAlloc();
 	gLogLock = IOSimpleLockAlloc();
@@ -949,6 +1033,8 @@ _start(kmod_info_t *ki, void *)
 extern "C" kern_return_t
 _stop(kmod_info_t *, void *)
 {
+	if (gIdleOff)
+		return KERN_SUCCESS;	/* -xegfxoff: nothing was set up */
 	if (gStage > 0)
 		return KERN_FAILURE;	/* no teardown yet */
 	for (auto *o : gOids)
