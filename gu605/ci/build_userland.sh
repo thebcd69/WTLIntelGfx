@@ -3,7 +3,7 @@
 # samwu07 built), plus a self-contained AIR bitcode reader (MacPorts LLVM 20 libLLVM.dylib relinked to @loader_path,
 # samwu07's add-bitcode-reader.sh), for the CI's macos-15-intel runner. MacPorts binary archives only (port -b).
 # OUTDIR gets libvulkan_intel.dylib, libdrm.2.dylib, air-runtime/, USERLAND.txt.
-set -euo pipefail
+set -Eeuo pipefail
 OUT=$1; mkdir -p "$OUT"
 # every build step's output, and its end on stdout when a step fails (the CI log is the only record)
 BLOG=$OUT/../userland-build.log; : > "$BLOG"
@@ -65,7 +65,11 @@ SDK=$(xcrun --sdk macosx --show-sdk-path)
 export CC=/usr/bin/clang CXX=/usr/bin/clang++ OBJC=/usr/bin/clang SDKROOT=$SDK
 # under Rosetta, name the architecture anyway (cmake and meson both read these)
 [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ] && export CFLAGS="-arch x86_64" CXXFLAGS="-arch x86_64" OBJCFLAGS="-arch x86_64" LDFLAGS="-arch x86_64" CMAKE_OSX_ARCHITECTURES=x86_64
-at_rev() { [ -d "$1/.git" ] || { git init -q "$1"; git -C "$1" remote add origin "$2"; }; git -C "$1" fetch -q --depth 1 origin "$3"; git -C "$1" checkout -q --force FETCH_HEAD; }
+# freedesktop.org's GitLab drops large shallow fetches now and then ("early EOF", run 41911644564): retry
+at_rev() { [ -d "$1/.git" ] || { git init -q "$1"; git -C "$1" remote add origin "$2"; }
+  local n; for n in 1 2 3 4 5; do git -C "$1" fetch -q --depth 1 origin "$3" && break
+    [ $n = 5 ] && { echo "fetch of $2 $3 failed 5 times"; return 1; }; echo "fetch of $2 failed, retry $n"; sleep $((n * 20)); done
+  git -C "$1" checkout -q --force FETCH_HEAD; }
 at_rev "$X/drm" https://gitlab.freedesktop.org/mesa/libdrm.git "$DRM_REV"
 at_rev "$X/mesa" https://gitlab.freedesktop.org/mesa/mesa.git "$MESA_REV"
 git -C "$X/drm" apply "$R/userland/patches/libdrm-macos.patch" "$R/userland/patches/libdrm-xegfx.patch"
