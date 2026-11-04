@@ -9,3 +9,9 @@ WSMARK=1
 K5=1
 # copy each run's summary to <EFI>/GU605/ (readable from Windows); 0 = never mount the EFI
 EFI_LOG=1
+# display path (docs/GU605-DISPLAY-DESIGN.md, branch gu605-display): adopt = keep the firmware's pipe (gu605-mtl);
+#   kms = Linux i915 owns the display (Eco): 240 Hz, the left USB-C port, native brightness. Falls back to adopt by
+#   itself (takeover preflight, kms-failed after a failed stage 4, boot-arg -xegfxnokms).
+DISPLAY=adopt
+# internal panel refresh after the KMS takeover (Hz; empty or 0 = leave the firmware's)
+PANEL_HZ=240

@@ -30,7 +30,9 @@
 #include <drm/display/drm_dp.h>
 
 #include "i915_drv.h"
+#include "i915_reg.h"
 #include "display/intel_backlight.h"
+#include "display/intel_de.h"
 #include "display/intel_display.h"
 #include "display/intel_display_types.h"
 #include "display/intel_dp.h"
@@ -236,9 +238,19 @@ xg_kms_dump(char *buf, unsigned long len)
 		xg_out(&b, " bootfb %ux%u pitch %u format 0x%08x modifier 0x%llx", fb->width, fb->height, fb->pitches[0],
 		    fb->format->format, (unsigned long long)fb->modifier);
 	xg_out(&b, "\n");
-	drm_for_each_crtc(crtc, dev)
-		xg_out(&b, "crtc %s id %u enable %d active %d %ux%u\n", crtc->name, crtc->base.id, crtc->state->enable,
-		    crtc->state->active, crtc->state->mode.hdisplay, crtc->state->mode.vdisplay);
+	drm_for_each_crtc(crtc, dev) {
+		u32 f0 = 0, f1 = 0;
+
+		/* the refresh the pipe really runs at: its frame counter over 250 ms */
+		if (crtc->state->active) {
+			f0 = intel_de_read(i915, PIPE_FRMCOUNT_G4X(i915, to_intel_crtc(crtc)->pipe));
+			msleep(250);
+			f1 = intel_de_read(i915, PIPE_FRMCOUNT_G4X(i915, to_intel_crtc(crtc)->pipe));
+		}
+		xg_out(&b, "crtc %s id %u enable %d active %d %ux%u measured %u Hz\n", crtc->name, crtc->base.id,
+		    crtc->state->enable, crtc->state->active, crtc->state->mode.hdisplay, crtc->state->mode.vdisplay,
+		    (f1 - f0) * 4);
+	}
 	drm_connector_list_iter_begin(dev, &it);
 	drm_for_each_connector_iter(connector, &it)
 		xg_dump_connector(&b, connector);

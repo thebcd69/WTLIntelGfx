@@ -45,8 +45,23 @@ DONE=$(sysctl -n debug.xegfx_stage)
 for s in $(seq 1 "$TARGET"); do
   [ "$s" -le "$DONE" ] && { say "stage $s: passed earlier this boot"; continue; }
   if [ "$s" = 4 ]; then
+    # display path (docs/GU605-DISPLAY-DESIGN.md): DISPLAY=kms asks the kext to let i915 own the display; the kext
+    # still refuses without stage 2's takeover preflight, with -xegfxnokms, or on anything but 7D55
+    KMS=0
+    if [ "$(conf DISPLAY adopt)" = kms ]; then
+      pre=$(sed -nE 's/.*"kms-preflight"="([^"]*)".*/\1/p' "$OUT/stage2-ioreg-XeGfxResident.txt" "$OUT/stage0-ioreg-XeGfxResident.txt" 2>/dev/null | head -1)
+      if has_bootarg -xegfxnokms; then say "display: DISPLAY=kms, but boot-arg -xegfxnokms: adopt path"
+      elif [ -e "$G/kms-failed" ]; then say "display: DISPLAY=kms, but $G/kms-failed exists (an earlier KMS stage 4 failed): adopt path; sudo rm it to retry"
+      elif [ "$pre" != ok ]; then say "display: DISPLAY=kms, but the takeover preflight says: ${pre:-not recorded}: adopt path"
+      else
+        KMS=1; env=$(sysctl -n debug.xegfx_env)
+        case "$env" in *xegfx.kms=1*) ;; *) sysctl -w debug.xegfx_env="$env xegfx.kms=1" > /dev/null ;; esac
+        say "display: i915 KMS requested (preflight ok); env: $(sysctl -n debug.xegfx_env)"
+      fi
+    fi
     # the GuC slot check, from stage 2's probe: never let i915 load the GuC under the panel's pixels
-    surf=$(sed -nE 's/.*"plane-surf-1-a"=([0-9]+).*/\1/p' "$OUT/stage3-ioreg-XeGfxResident.txt" "$OUT/stage2-ioreg-XeGfxResident.txt" "$OUT/stage0-ioreg-XeGfxResident.txt" 2>/dev/null | head -1)
+    # (KMS: i915 rebinds the surface at GGTT 0 itself before it reserves the GuC slot)
+    [ "$KMS" = 1 ] || surf=$(sed -nE 's/.*"plane-surf-1-a"=([0-9]+).*/\1/p' "$OUT/stage3-ioreg-XeGfxResident.txt" "$OUT/stage2-ioreg-XeGfxResident.txt" "$OUT/stage0-ioreg-XeGfxResident.txt" 2>/dev/null | head -1)
     if [ -n "$surf" ]; then surf=$((surf & 0xFFFFF000))
       printf 'boot surface GGTT 0x%08X\n' "$surf" | tee -a "$OUT/stages.log"
       if [ "$surf" -ge $((0xFEE00000)) ] && [ "$surf" -lt $((0xFF000000)) ]; then
@@ -61,9 +76,32 @@ for s in $(seq 1 "$TARGET"); do
   DONE=$(sysctl -n debug.xegfx_stage)
   read -r -a R <<< "$(results)"
   if [ $rc -ne 0 ] || [ "$DONE" -lt "$s" ]; then
-    say "stage $s FAILED: result ${R[$s]:-?}"; tail -30 "$OUT/stage$s-xegfx-log.txt" >> "$OUT/stages.log"; exit 1
+    say "stage $s FAILED: result ${R[$s]:-?}"; tail -30 "$OUT/stage$s-xegfx-log.txt" >> "$OUT/stages.log"
+    if [ "$s" = 4 ] && [ "${KMS:-0}" = 1 ]; then
+      touch "$G/kms-failed"; sysctl -n debug.xegfx_kms > "$OUT/display-kms.txt" 2>&1
+      say "display: stage 4 failed with i915 owning the display: later boots use the adopt path ($G/kms-failed)"; fi
+    exit 1
   fi
   say "stage $s passed"
+  if [ "$s" = 4 ]; then
+    ioreg -l -w0 -r -c XeGfxResident -d 1 2>/dev/null | grep -oE '"XeGfx(Kms|Post)[A-Za-z]*" = [^,]*(,[^"]*)?' > "$OUT/stage4-kms-ioreg.txt"
+    if sysctl -n debug.xegfx_kms > "$OUT/display-kms.txt" 2>&1 && grep -q '^connector' "$OUT/display-kms.txt"; then
+      say "display: i915 owns the display"; grep -E '^(xegfx-kms|crtc|connector)|active crtc|backlight' "$OUT/display-kms.txt" | tee -a "$OUT/stages.log" > /dev/null
+      hz=$(conf PANEL_HZ 240)
+      if [ -n "$hz" ] && [ "$hz" != 0 ]; then
+        edp=$(sed -nE 's/^connector (eDP-[0-9]+) .*status connected.*/\1/p' "$OUT/display-kms.txt" | head -1)
+        if [ -n "$edp" ] && grep -A200 "^connector $edp " "$OUT/display-kms.txt" | grep -q "active crtc"; then
+          sysctl -w debug.xegfx_kms_set="$edp $hz test" > /dev/null 2>&1; say "display: $(sysctl -n debug.xegfx_kms_set)"
+          if sysctl -w debug.xegfx_kms_set="$edp $hz" > /dev/null 2>&1; then say "display: $(sysctl -n debug.xegfx_kms_set)"
+          else say "display: switch to $hz Hz refused: $(sysctl -n debug.xegfx_kms_set)"; fi
+          sysctl -n debug.xegfx_kms > "$OUT/display-kms-after.txt" 2>&1
+          grep -E '^crtc|active crtc' "$OUT/display-kms-after.txt" | tee -a "$OUT/stages.log" > /dev/null
+        fi
+      fi
+    else
+      say "display: adopt path ($(head -1 "$OUT/display-kms.txt"))"
+    fi
+  fi
   [ "$s" = 2 ] && { probe_decode "$OUT/stage2-ioreg-XeGfxResident.txt" > "$OUT/display-decoded.txt" 2>&1; cat "$OUT/display-decoded.txt" >> "$OUT/stages.log"; }
 done
 [ "$TARGET" = 7 ] && { ioreg -l -w0 -r -c NMXAccel > "$OUT/ioreg-NMXAccel.txt" 2>&1
