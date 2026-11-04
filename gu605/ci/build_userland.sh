@@ -5,6 +5,9 @@
 # OUTDIR gets libvulkan_intel.dylib, libdrm.2.dylib, air-runtime/, USERLAND.txt.
 set -euo pipefail
 OUT=$1; mkdir -p "$OUT"
+# every build step's output, and its end on stdout when a step fails (the CI log is the only record)
+BLOG=$OUT/../userland-build.log; : > "$BLOG"
+trap 'rc=$?; echo "userland: FAILED (exit $rc) at line $LINENO: $BASH_COMMAND"; tail -80 "$BLOG"' ERR
 R=$(cd "$(dirname "$0")/../.." && pwd)
 X=$HOME/src/xe-userland; mkdir -p "$X"
 DRM_REV=b97cbde15c5c3abfe44d78e8f57139e50f612fec
@@ -60,16 +63,16 @@ git -C "$X/mesa" apply "$R/userland/patches/mesa-macos.patch" "$R/userland/patch
 # SPIRV-LLVM-Translator for mesa_clc (host tool only)
 S=$X/SPIRV-LLVM-Translator; at_rev "$S" https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git "refs/tags/$SPIRVLLVM_TAG"
 cmake -S "$S" -B "$S/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$X/spirv-llvm" \
-  -DLLVM_DIR="$("$LLVM_CONFIG" --cmakedir)" -DLLVM_INCLUDE_TESTS=OFF -DCMAKE_OSX_SYSROOT="$SDK" -DCMAKE_IGNORE_PREFIX_PATH=/usr/local > /dev/null
-ninja -C "$S/build" -j "$JOBS" > /dev/null; cmake --install "$S/build" > /dev/null
+  -DLLVM_DIR="$("$LLVM_CONFIG" --cmakedir)" -DLLVM_INCLUDE_TESTS=OFF -DCMAKE_OSX_SYSROOT="$SDK" -DCMAKE_IGNORE_PREFIX_PATH=/usr/local >> "$BLOG" 2>&1
+ninja -C "$S/build" -j "$JOBS" >> "$BLOG" 2>&1; cmake --install "$S/build" >> "$BLOG" 2>&1
 # libdrm (core only; libdrm_intel needs libpciaccess, BUILD.md)
 export PKG_CONFIG_LIBDIR=$X/prefix/lib/pkgconfig
 meson setup "$X/drm/build" "$X/drm" --prefix="$X/prefix" --libdir=lib -Dbuildtype=release \
   -Dc_args=-mmacosx-version-min=11.0 -Dc_link_args=-mmacosx-version-min=11.0 \
   -Dintel=disabled -Damdgpu=disabled -Dradeon=disabled -Dnouveau=disabled -Dvmwgfx=disabled -Domap=disabled \
   -Dexynos=disabled -Dtegra=disabled -Dvc4=disabled -Detnaviv=disabled \
-  -Dcairo-tests=disabled -Dman-pages=disabled -Dvalgrind=disabled -Dtests=false -Dinstall-test-programs=false > /dev/null
-ninja -C "$X/drm/build" > /dev/null; meson install -C "$X/drm/build" > /dev/null
+  -Dcairo-tests=disabled -Dman-pages=disabled -Dvalgrind=disabled -Dtests=false -Dinstall-test-programs=false >> "$BLOG" 2>&1
+ninja -C "$X/drm/build" >> "$BLOG" 2>&1; meson install -C "$X/drm/build" >> "$BLOG" 2>&1
 # host mesa_clc + vtn_bindgen2
 LLVM_LIB=$("$LLVM_CONFIG" --libdir)
 printf "[binaries]\nllvm-config = '%s'\ncmake = 'false'\n" "$LLVM_CONFIG" > "$X/native-llvm.ini"
@@ -80,8 +83,8 @@ PKG_CONFIG_LIBDIR= PKG_CONFIG_PATH=$X/spirv-llvm/lib/pkgconfig:$MP/lib/pkgconfig
   -Dvulkan-drivers= -Dgallium-drivers= -Dplatforms= -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
   -Degl=disabled -Dglx=disabled -Dglvnd=disabled -Dvulkan-layers= -Dtools= \
   -Dbuild-tests=false -Dexpat=disabled -Dzstd=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
-  -Dvalgrind=disabled -Dxlib-lease=disabled -Dgallium-rusticl=false > /dev/null
-ninja -C "$X/mesa/build-host" > /dev/null; meson install -C "$X/mesa/build-host" > /dev/null
+  -Dvalgrind=disabled -Dxlib-lease=disabled -Dgallium-rusticl=false >> "$BLOG" 2>&1
+ninja -C "$X/mesa/build-host" >> "$BLOG" 2>&1; meson install -C "$X/mesa/build-host" >> "$BLOG" 2>&1
 # target ANV, no LLVM; expat from the SDK (BUILD.md)
 mkdir -p "$X/sdk-pc"; printf 'Name: expat\nVersion: 2.7.1\nDescription: SDK expat\nLibs: -lexpat\nCflags:\n' > "$X/sdk-pc/expat.pc"
 printf "[binaries]\ncmake = 'false'\nllvm-config = 'false'\n" > "$X/native-target.ini"
@@ -93,8 +96,8 @@ PATH=$X/host/bin:$PATH PKG_CONFIG_LIBDIR=$X/prefix/lib/pkgconfig:$X/sdk-pc meson
   -Dmesa-clc=system -Dprecomp-compiler=auto \
   -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Degl=disabled -Dglx=disabled -Dglvnd=disabled -Dgbm=disabled \
   -Dvulkan-layers= -Dbuild-tests=false -Dexpat=enabled -Dzstd=disabled -Dlibunwind=disabled -Dlmsensors=disabled \
-  -Dvalgrind=disabled -Dxlib-lease=disabled -Dgallium-rusticl=false -Dvideo-codecs= > /dev/null
-PATH=$X/host/bin:$PATH ninja -C "$X/mesa/build" > /dev/null; meson install -C "$X/mesa/build" > /dev/null
+  -Dvalgrind=disabled -Dxlib-lease=disabled -Dgallium-rusticl=false -Dvideo-codecs= >> "$BLOG" 2>&1
+PATH=$X/host/bin:$PATH ninja -C "$X/mesa/build" >> "$BLOG" 2>&1; meson install -C "$X/mesa/build" >> "$BLOG" 2>&1
 cp "$X/prefix/lib/libvulkan_intel.dylib" "$X/prefix/lib/libdrm.2.dylib" "$OUT/"
 # AIR bitcode reader: libLLVM + every MacPorts library it needs, relinked to @loader_path (samwu07)
 A=$OUT/air-runtime; mkdir -p "$A"; LL=$MP/libexec/llvm-20/lib
