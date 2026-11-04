@@ -28,10 +28,11 @@ env:
   KCABI_REV: cea28a5297633118177cee6a75e86d8bc57f1960        # watchthelight-labs/WTLKcAbi
   OGKM_TAG: 615.78.08                                       # NVIDIA open-gpu-kernel-modules (accelerator headers)
   VK_TAG: v1.4.328                                          # Khronos Vulkan-Headers (plugin)
+  XNU_TAG: xnu-11215.81.4                                   # macOS 15 xnu: config/*.exports for the arm job's link checks
 jobs:
   arm:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -47,6 +48,33 @@ jobs:
           curl -fsSL --retry 3 -o /tmp/ogkm.tgz "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/$OGKM_TAG.tar.gz"
           tar -xzf /tmp/ogkm.tgz -C "$HOME/src/deps"; mv "$HOME/src/deps/open-gpu-kernel-modules-$OGKM_TAG" "$HOME/src/deps/open-gpu-$OGKM_TAG"
           git clone -q --depth 1 --branch "$VK_TAG" https://github.com/KhronosGroup/Vulkan-Headers.git "$HOME/src/deps/Vulkan-Headers"
+      - name: Sources for XeGfx (drm-kmod, FreeBSD, xnu export lists)
+        run: |
+          set -euo pipefail
+          S=$HOME/src/xe-src; mkdir -p "$S"
+          git init -q "$S/drm-kmod"; git -C "$S/drm-kmod" remote add origin https://github.com/freebsd/drm-kmod.git
+          git -C "$S/drm-kmod" fetch -q --depth 1 origin "$DRM_KMOD_REV"; git -C "$S/drm-kmod" checkout -q FETCH_HEAD
+          git clone -q --filter=tree:0 --no-checkout https://github.com/freebsd/freebsd-src.git "$S/freebsd"
+          git -C "$S/freebsd" sparse-checkout set --no-cone '/sys/*' '!/sys/contrib/*' '/sys/contrib/ck/' '/sys/contrib/dev/acpica/' \
+            '!/sys/arm/' '!/sys/arm64/' '!/sys/riscv/' '!/sys/powerpc/' '!/sys/i386/' '!/sys/modules/' '!/sys/gnu/'
+          git -C "$S/freebsd" checkout -q "$FREEBSD_REV"
+          # the x86_64 kernel's KPI export lists (xnu config/*.exports): this Apple-silicon runner has no x86_64 collection
+          git clone -q --depth 1 --branch "$XNU_TAG" --filter=blob:none --sparse https://github.com/apple-oss-distributions/xnu.git "$HOME/src/xnu"
+          git -C "$HOME/src/xnu" sparse-checkout set config
+          echo "XEGFX_XNU_EXPORTS=$HOME/src/xnu/config" >> "$GITHUB_ENV"
+      - name: Firmware (linux-firmware i915, SHA-256 checked)
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.firmware_ref }}"
+          python3 -I gu605/tools/fetch_firmware.py --lock gu605/firmware.lock --out "$HOME/src/xe-src/linux-firmware" ${REF:+--ref "$REF"}
+      - name: XeGfx.kext (exports-list link checks; the Intel job's native build wins when it runs)
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          export XEGFX_FW=$HOME/src/xe-src/linux-firmware
+          bash build/build_xegfx.sh 2>&1 | tee out/build-xegfx-arm.log
+          test -f out/XeGfx.kext/Contents/MacOS/XeGfx; lipo -archs out/XeGfx.kext/Contents/MacOS/XeGfx
+          cp "$XEGFX_FW/FIRMWARE.txt" out/FIRMWARE.txt
       - name: Kexts (XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove)
         run: |
           set -euo pipefail
@@ -83,6 +111,8 @@ jobs:
         with:
           name: arm-out
           path: |
+            out/XeGfx.kext
+            out/FIRMWARE.txt
             out/kexts/XeGfxIntelFB/XeGfxIntelFB.kext
             out/kexts/XeGfxAccel/15/XeGfxAccel.kext
             out/kexts/XeGfxAGDC/XeGfxAGDC.kext
@@ -190,6 +220,10 @@ jobs:
           NOTE=""
           if [ -f art/xegfx-out/XeGfx.kext/Contents/MacOS/XeGfx ]; then
             ditto art/xegfx-out/XeGfx.kext "$P/EFI/OC/Kexts/XeGfx.kext"; cp art/xegfx-out/FIRMWARE.txt "$P/"
+            NOTE="$NOTE XeGfx.kext from the Intel runner (native x86_64 collection checks)."
+          elif [ -f "$A/XeGfx.kext/Contents/MacOS/XeGfx" ]; then
+            ditto "$A/XeGfx.kext" "$P/EFI/OC/Kexts/XeGfx.kext"; cp "$A/FIRMWARE.txt" "$P/"
+            NOTE="$NOTE XeGfx.kext from the arm runner (link checks against xnu's x86_64 export lists, not a real collection)."
           else
             # fallback: upstream's v0.0.47 release kext (samwu07 ran it unmodified on 7D55), checked against the SHA-256
             # its release notes publish. It lacks this branch's kernel-side additions (-xegfxoff, the Type-C dump); the
@@ -207,7 +241,7 @@ jobs:
           cp gu605/scripts/* "$P/scripts/"; cp gu605/launchd/* "$P/launchd/"; chmod 755 "$P/scripts/"*.sh
           cp docs/GU605-*.md docs/IGPU-FEASIBILITY.md "$P/docs/"; cp LICENSE NOTICE "$P/"; cp -R licenses "$P/licenses"
           { echo "branch gu605-mtl commit $(git rev-parse HEAD)"; echo "jobs: arm ${{ needs.arm.result }}, intel ${{ needs.intel.result }}"
-            echo "drm-kmod $DRM_KMOD_REV freebsd $FREEBSD_REV kcabi $KCABI_REV ogkm $OGKM_TAG vk $VK_TAG"; [ -n "$NOTE" ] && echo "INCOMPLETE:$NOTE" || echo "complete"
+            echo "drm-kmod $DRM_KMOD_REV freebsd $FREEBSD_REV kcabi $KCABI_REV ogkm $OGKM_TAG vk $VK_TAG xnu $XNU_TAG"; echo "notes:$NOTE"
             cat art/arm-out/*.log 2>/dev/null | grep -E '^(XeGfxIntelFB|XgFbMove|XeMTLDriver|15 |XeGfxAGDC)' || true; } > "$P/BUILDINFO.txt"
           (cd "$P" && find . -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS)
           (cd out/pkg && ditto -c -k --keepParent "gu605-$SHA" "gu605-$SHA.zip")

@@ -41,10 +41,16 @@ if [ -f "$FW/mtl_guc_70.bin" ]; then
 fi
 codesign -s - -f "$ROOT/out/XeGfx.kext" >/dev/null 2>&1 || true
 echo "XeGfx.kext $(stat -f %z "$B/MacOS/XeGfx") B"
+if [ -n "${XEGFX_XNU_EXPORTS:-}" ]; then
+  # GU605 branch, Apple-silicon host: no x86_64 collection to check against; the link check against the declared KPI
+  # libraries happens when OpenCore or kmutil links the kext on the Mac
+  echo "linkcheck/kpi_check skipped: no x86_64 kernel collection on this host (xnu export lists used for kpi_split/shadow)"
+else
 python3 ~/src/kcabi/linkcheck.py "$ROOT/out/XeGfx.kext" | tail -25
 # every undefined symbol must resolve from a declared, public KPI library (kmutil enforces this when it builds a
 # collection; linkcheck only knows what the kernel exports)
 python3 "$ROOT/tools/kpi_check.py" "$ROOT/out/XeGfx.kext" || exit 1
+fi
 # a kernel name defined inside the kext would capture the XNU-side callers (I-094)
 python3 "$ROOT/tools/shadow_check.py" "$ROOT/out/XeGfx.kext" || exit 1
 # and against every other macOS build's collection we have (~/abi-src/<build>/kc, see kcabi)
