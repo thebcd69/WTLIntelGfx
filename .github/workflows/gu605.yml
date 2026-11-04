@@ -83,6 +83,11 @@ jobs:
           mkdir -p out/tools
           xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework IOKit \
             userland/tools/mtlprobe.m -o out/tools/mtlprobe
+      - name: Userland (Mesa ANV, libdrm, AIR bitcode reader)
+        id: userland
+        continue-on-error: true
+        timeout-minutes: 100
+        run: bash gu605/ci/build_userland.sh "$PWD/out/userland" 2>&1 | tee out/userland.log
       - name: Host tests (XgFbMove relocation core, scripts)
         run: |
           set -euo pipefail
@@ -98,6 +103,7 @@ jobs:
           SHA=$(git rev-parse --short HEAD); P=out/pkg/gu605-$SHA; echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           mkdir -p "$P/EFI/OC/Kexts" "$P/Library/Extensions" "$P/Library/GPUBundles" "$P/scripts" "$P/launchd" "$P/docs" "$P/tools"
           cp out/tools/mtlprobe "$P/tools/"
+          if [ -f out/userland/libvulkan_intel.dylib ]; then ditto out/userland "$P/userland"; else echo "::warning::package without userland (Mesa ANV)"; fi
           ditto out/XeGfx.kext "$P/EFI/OC/Kexts/XeGfx.kext"
           for k in XeGfxIntelFB/XeGfxIntelFB XeGfxAccel/15/XeGfxAccel XeGfxAGDC/XeGfxAGDC XgFbMove/XgFbMove; do
             ditto "out/kexts/$k.kext" "$P/Library/Extensions/$(basename "$k").kext"; done
