@@ -18,11 +18,21 @@ MP=/opt/local
 case "$(sw_vers -productVersion | cut -d. -f1)" in
   14) MPOS=14-Sonoma ;; 15) MPOS=15-Sequoia ;; 26) MPOS=26-Tahoe ;; *) echo "no MacPorts pkg for macOS $(sw_vers -productVersion)"; exit 1 ;;
 esac
-MPPKG=https://github.com/macports/macports-base/releases/download/v2.12.7/MacPorts-2.12.7-$MPOS.pkg
 JOBS=$(sysctl -n hw.ncpu)
 if [ ! -x $MP/bin/port ]; then
-  curl -fsSL --retry 3 -o /tmp/macports.pkg "$MPPKG"
-  pkgutil --check-signature /tmp/macports.pkg | grep 'Developer ID Installer: The MacPorts Project' > /dev/null || { echo "MacPorts pkg signature"; exit 1; }
+  got=""
+  for u in https://github.com/macports/macports-base/releases/download/v2.12.7/MacPorts-2.12.7-$MPOS.pkg \
+           https://distfiles.macports.org/MacPorts/MacPorts-2.12.7-$MPOS.pkg \
+           https://github.com/macports/macports-base/releases/download/v2.11.6/MacPorts-2.11.6-$MPOS.pkg \
+           https://distfiles.macports.org/MacPorts/MacPorts-2.11.6-$MPOS.pkg; do
+    rm -f /tmp/macports.pkg
+    curl -fsSL --retry 3 -o /tmp/macports.pkg "$u" 2>/dev/null || { echo "MacPorts pkg: $u not available"; continue; }
+    sig=$(pkgutil --check-signature /tmp/macports.pkg 2>&1 || true)
+    if printf '%s\n' "$sig" | grep -q 'Developer ID Installer: The MacPorts Project'; then got=$u; break; fi
+    echo "MacPorts pkg: $u signature not accepted:"; printf '%s\n' "$sig" | head -8
+  done
+  [ -n "$got" ] || { echo "MacPorts pkg signature: no signed MacPorts installer for $MPOS"; exit 1; }
+  echo "MacPorts from $got"
   sudo installer -pkg /tmp/macports.pkg -target / > /dev/null
 fi
 export PATH=$MP/bin:$MP/sbin:$PATH
