@@ -1,0 +1,11 @@
+# GU605 branch: a 10-second job on Linux, to tell "no macOS runner for this account" from a broken workflow.
+name: gu605-probe
+on:
+  push:
+    branches: [gu605-mtl]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: uname -a; date -u
