@@ -3,7 +3,7 @@
 # publishes a prerelease gu605-<shortsha>.
 #   arm   (macos-14 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
 #         XeMTLDriver.bundle, mtlprobe, host tests. These kexts declare fixed KPIs; nothing reads the host's KC.
-#   intel (macos-15-intel): XeGfx.kext (its link step classifies every undefined symbol against the runner's own
+#   intel (macos-15-intel, only with vars.GU605_INTEL_JOB=1): XeGfx.kext (its link step classifies every undefined symbol against the runner's own
 #         x86_64 kernel collection, so it must run on Intel macOS) and the userland. Hosted Intel runners are scarce;
 #         when this job does not run, the package says so and leaves those parts out.
 #   userland-rosetta (same runner): Mesa ANV x86_64 under Rosetta, used when the Intel job gave none.
@@ -139,6 +139,10 @@ jobs:
           if-no-files-found: ignore
 
   intel:
+    # opt-in (repository variable GU605_INTEL_JOB=1): hosted Intel runners were not available to this account in
+    # November 2026, and a job that is never picked up held the package back. Without it XeGfx.kext comes from the
+    # arm job (link checks against xnu's x86_64 export lists) and Mesa ANV from userland-rosetta.
+    if: vars.GU605_INTEL_JOB == '1'
     runs-on: macos-15-intel
     timeout-minutes: 180
     steps:
