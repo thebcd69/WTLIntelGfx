@@ -552,8 +552,14 @@ static bool nvmtl_process_is_allowed(void)
           nvlog("  headless GPU: no device for WindowServer (it composites on the GPU that owns the display)"); return false; } }
     if (getenv("NVMTL_ENABLE")) return true;
     if (!strcmp(me, "mtlprobe") || !strcmp(me, "nvmtltest") || !strcmp(me, "nvmtlrender")) return true;
+#ifdef NVMTL_ALLOW_LIST
+    /* GU605 branch: the Intel-only bundle (XeMTLDriver) keeps its own list, so NullMoth's nvmtl-allow.txt for the
+       NVIDIA GPU is never shared or rewritten */
+    FILE *f = fopen(NVMTL_ALLOW_LIST, "r");
+#else
     FILE *f = fopen("/Library/GPUBundles/nvmtl-allow.txt", "r");
     if (!f) f = fopen("/Library/Extensions/nvmtl-allow.txt", "r");
+#endif
     if (!f) { nvlog("  no allow-list readable from this process: no device for %s (cannot read nvmtl-allow.txt)", me); return false; }
     char line[256]; bool ok = false;
     while (fgets(line, sizeof line, f)) {
