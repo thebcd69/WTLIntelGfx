@@ -356,6 +356,7 @@ xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, i
 	drm_modeset_acquire_init(&ctx, 0);
 	state->acquire_ctx = &ctx;
 retry:
+	target = NULL;
 	ret = drm_modeset_lock_all_ctx(dev, &ctx);
 	if (ret)
 		goto out;
@@ -366,8 +367,19 @@ retry:
 		ret = -ENOSPC;
 		goto out;
 	}
-	/* the CRTC: the connector's own, else the one being freed (single display), else the first it can use */
-	target = connector->state->crtc;
+	/*
+	 * The CRTC: the one scanning the boot framebuffer (pipe A: XeGfxIntelFB's VBL and the accelerator's zero-copy flip
+	 * follow pipe A), else the connector's own, else any enabled one being freed (single display), else the first the
+	 * encoder can use.
+	 */
+	drm_for_each_crtc(crtc, dev)
+		if (crtc->state->enable && crtc->primary->state != NULL && crtc->primary->state->fb == fb &&
+		    (enc->base.possible_crtcs & drm_crtc_mask(crtc))) {
+			target = crtc;
+			break;
+		}
+	if (target == NULL)
+		target = connector->state->crtc;
 	if (target == NULL)
 		drm_for_each_crtc(crtc, dev)
 			if (crtc->state->enable && (enc->base.possible_crtcs & drm_crtc_mask(crtc))) {

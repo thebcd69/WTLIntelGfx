@@ -460,6 +460,8 @@ public:
         }
         bool ok = IONDRVFramebuffer::start(provider);
         if (!ok && fBacklight) { fBacklight->detach(this); OSSafeReleaseNULL(fBacklight); }
+        // display path: watch for i915 taking the display over (also if IOFramebuffer never asks for connect interrupts)
+        { int nk = 0; if (ok && fGu605 && !PE_parse_boot_argn("-xeintelfbnokms", &nk, sizeof nk)) kmsWatchStart(); }
         // the name is still the class name here; it becomes ".Display_boot" when the boot NDRV opens it
         XIFBLOG("IONDRVFramebuffer start %s, name %s", ok ? "ok" : "FAILED", getName());
         // a GPU's own framebuffer driver names its GPU and its slot; IONDRVFramebuffer does not, and XeGfxAGDC left

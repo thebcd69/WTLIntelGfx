@@ -22,7 +22,8 @@
 
     static void kmsThunk(thread_call_param_t me, thread_call_param_t) { ((XeGfxIntelFramebuffer *)me)->kmsTick(); }
     void kmsArm(unsigned ms) {
-        uint64_t dl; clock_interval_to_deadline(ms, kMillisecondScale, &dl); thread_call_enter_delayed(fKmsCall, dl);
+        thread_call_t c = fKmsCall; if (!c) return;
+        uint64_t dl; clock_interval_to_deadline(ms, kMillisecondScale, &dl); thread_call_enter_delayed(c, dl);
     }
     void kmsWatchStart() {
         if (!fKmsLock) fKmsLock = IOLockAlloc();
@@ -169,6 +170,13 @@
         if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }
     }
 public:
+    void stop(IOService *provider) override {
+        if (fKmsCall) {   // a tick already running finishes; none is armed again (fKmsCall cleared first)
+            thread_call_t c = fKmsCall; fKmsCall = nullptr; thread_call_cancel(c);
+            while (!thread_call_free(c)) { thread_call_cancel(c); IOSleep(1); }
+        }
+        IONDRVFramebuffer::stop(provider);
+    }
     IOItemCount getDisplayModeCount() override {
         if (!fKmsUp || !fBootId) return IONDRVFramebuffer::getDisplayModeCount();
         IOItemCount n = fExternal ? 0 : 1;
