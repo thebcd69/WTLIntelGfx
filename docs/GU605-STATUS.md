@@ -21,9 +21,11 @@ test kartı: `docs/GU605-TEST.md`; EFI farkı: `docs/GU605-EFI-CHANGES.md`.
 - Önerilen EFI: `/home/claude/gu605-efi-work/proposed/` (yalnız 2 config değişikliği + XeGfx.kext; `CHANGES.md`).
 
 ## Devam ediyor
-- CI (`.github/workflows/gu605.yml`): `arm` (macos-15, çapraz derleme), `intel` (macos-15-intel: XeGfx.kext + Mesa
-  ANV), `pack` (prerelease). İlk denemede Intel runner hiç alınamadı; Intel işi yine çalışmazsa paket upstream
-  v0.0.47 XeGfx.kext'ini (yayın notundaki SHA-256 ile doğrulanmış) kullanır ve Mesa ANV'siz çıkar (koşucu aşama 6'da durur).
+- CI (`.github/workflows/gu605.yml`), Kasım 2026 Actions arızası nedeniyle: `arm` ve `pack` **macos-14**'te (Xcode 16
+  seçilir, macOS 15 SDK; `vars.GU605_ARM_RUNNER` ile değişir), Mesa ANV `userland-rosetta` işinde x86_64 olarak
+  Rosetta altında (MacPorts `build_arch x86_64`, çıktılar `lipo` ile x86_64 denetlenir). `intel` (macos-15-intel)
+  yalnız `vars.GU605_INTEL_JOB=1` ile; yoksa XeGfx.kext arm işinden gelir (xnu dışa aktarım listesine karşı bağlantı
+  denetimi). Firmware sabit: linux-firmware 20261019, SHA-256'lar `gu605/firmware.lock`'ta.
 
 ## 240 Hz (sahibin hedefi: dahili ve harici 240 Hz)
 - Mevcut tasarım mode-set yapmaz: panel firmware'in yaktığı hızda kalır; 240 Hz kipi DTD'ye sığmadığı için (1043 MHz >
