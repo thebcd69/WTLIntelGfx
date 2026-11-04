@@ -127,6 +127,7 @@ extern id gNVMTLMainDevice;
   CFTimeInterval _gpuStart, _gpuEnd;
   CFTimeInterval _legacyKernelStart, _legacyKernelEnd;
   nvmtl_gpu_interval _gpuTiming; BOOL _gpuTimingSeen, _gpuTimingInvalid;
+  uint64_t _wsCommitNs;   // <wsmark> commit time, CLOCK_UPTIME_RAW (WindowServer frame breakdown)
   NSMutableArray *_parts, *_scheduledHandlers;
   NSUInteger _nextPart;
   NSUInteger _nextSubmit;

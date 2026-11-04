@@ -117,7 +117,7 @@ static BOOL nvmtl_ws_surface_wait(void) {
 }
 // What one WindowServer command buffer holds: the surfaces it marked pending in the kernel, and the textures whose shared
 // VRAM its commit marked newest. early is fixed at commit (nvmtl_ws_surface_wait): the marks are released part by part.
-@interface NVMTLSurfaceHolds : NSObject { @public NSMutableSet *ids; NSSet *dirtied; BOOL early; } @end
+@interface NVMTLSurfaceHolds : NSObject { @public NSMutableSet *ids; NSSet *dirtied; BOOL early; uint64_t t0; } @end
 @implementation NVMTLSurfaceHolds @end
 // A texture whose part has landed while its surface is still held, published by the holder that releases it last.
 // dirtied: the commit marked its VRAM newest, so publication is bookkeeping only (nvmtlSurfaceOutDirtied:).
@@ -206,6 +206,7 @@ static void nvmtl_ws_mark_pending(NVMTLCommandBuffer *cb) {
     if (!ids) return;
     NVMTLSurfaceHolds *holds = [NVMTLSurfaceHolds new];
     holds->ids = ids; holds->early = nvmtl_ws_surface_wait();
+    holds->t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);   // <wsmark> commit time, for the diagnostics in mark_ready
     if (holds->early) {
         NSMutableSet *dirtied = [NSMutableSet new];
         for (NVMTLSubmissionPart *part in cb->_parts) {
@@ -249,10 +250,79 @@ static NSArray *nvmtl_ws_part_landed(NVMTLCommandBuffer *cb, NSUInteger index, N
     for (NSNumber *n in last) nvmtl_ws_release(holds, n.unsignedIntValue, settled);
     return publish;
 }
+// <wsmark> 2026-11-03 14:55, Intel: 305 swaps timed out (100 ms) waiting for a ready mark and the Dock vanished. How long
+// a composite takes from commit to its release here, and how many holds stay open: a late completion shows as slow
+// releases, a leaked hold as a count that only grows. One summary line every 5 s, the first 16 slow ones in full.
+static void nvmtl_ws_mark_diag(NVMTLSurfaceHolds *holds) {
+    static _Atomic uint64_t last, n, slow, worst;
+    static _Atomic unsigned slowLogged;
+    const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW), dt = holds->t0 && now > holds->t0 ? now - holds->t0 : 0;
+    atomic_fetch_add(&n, 1);
+    for (uint64_t w = atomic_load(&worst); dt > w && !atomic_compare_exchange_weak(&worst, &w, dt); ) ;
+    if (dt > 50000000ull) {
+        atomic_fetch_add(&slow, 1);
+        if (atomic_fetch_add(&slowLogged, 1) < 16) {
+            NSArray *ids; @synchronized (nvmtl_ws_lock()) { ids = holds->ids.allObjects; }
+            nvlog("WindowServer marks: composite released %llu ms after its commit, surfaces %s", dt / 1000000ull,
+                  [[ids componentsJoinedByString:@","] UTF8String] ?: "?");
+        }
+    }
+    uint64_t l = atomic_load(&last);
+    if (now - l < 5000000000ull || !atomic_compare_exchange_strong(&last, &l, now)) return;
+    unsigned open = 0, distinct = 0, top = 0; uint32_t topId = 0;
+    @synchronized (nvmtl_ws_lock()) {
+        for (NSNumber *k in nvmtl_ws_pending_holds) {
+            const unsigned c = (unsigned)[nvmtl_ws_pending_holds countForObject:k];
+            distinct++; open += c;
+            if (c > top) { top = c; topId = k.unsignedIntValue; }
+        }
+    }
+    nvlog("WindowServer marks: %llu composites, %llu over 50 ms, worst %llu ms; open holds %u on %u surface(s), most %u on %#x",
+          (unsigned long long)atomic_load(&n), (unsigned long long)atomic_load(&slow), (unsigned long long)(atomic_load(&worst) / 1000000ull),
+          open, distinct, top, topId);
+}
+// <wsmark> Where a WindowServer composite's time goes (2026-11-03 15:44: ~34 ms each, the ~30 frames/s cap): commit ->
+// the GPU starts (the plugin's own work and the queue ahead), the GPU's span over all parts (device timestamps on
+// CLOCK_UPTIME_RAW), the GPU's end -> this completion. A summary every 5 s, the first 8 composites over 50 ms in full.
+static void nvmtl_ws_frame_diag(NVMTLCommandBuffer *cb, double gs, double ge, NSUInteger parts, BOOL failed) {
+    static int ws = -1; if (ws < 0) ws = getprogname() && !strcmp(getprogname(), "WindowServer");
+    if (!ws || failed || !cb->_wsCommitNs) return;
+    static _Atomic uint64_t n, untimed, qSum, gSum, dSum, tSum, pSum, qMax, gMax, dMax, tMax, last;
+    static _Atomic unsigned logged;
+    const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW), c = cb->_wsCommitNs;
+    const uint64_t total = now > c ? (now - c) / 1000 : 0;   // us
+    atomic_fetch_add(&n, 1); atomic_fetch_add(&tSum, total); atomic_fetch_add(&pSum, parts);
+    for (uint64_t m = atomic_load(&tMax); total > m && !atomic_compare_exchange_weak(&tMax, &m, total); ) ;
+    uint64_t q = 0, g = 0, dn = 0;
+    if (gs > 0 && ge >= gs) {
+        const uint64_t a = (uint64_t)(gs * 1e9), b = (uint64_t)(ge * 1e9);
+        q = a > c ? (a - c) / 1000 : 0; g = (b - a) / 1000; dn = now > b ? (now - b) / 1000 : 0;
+        atomic_fetch_add(&qSum, q); atomic_fetch_add(&gSum, g); atomic_fetch_add(&dSum, dn);
+        for (uint64_t m = atomic_load(&qMax); q > m && !atomic_compare_exchange_weak(&qMax, &m, q); ) ;
+        for (uint64_t m = atomic_load(&gMax); g > m && !atomic_compare_exchange_weak(&gMax, &m, g); ) ;
+        for (uint64_t m = atomic_load(&dMax); dn > m && !atomic_compare_exchange_weak(&dMax, &m, dn); ) ;
+    } else atomic_fetch_add(&untimed, 1);
+    if (total > 50000 && atomic_fetch_add(&logged, 1) < 8)
+        nvlog("WindowServer frame: %llu ms = commit->GPU start %llu ms + GPU %llu ms + GPU end->done %llu ms, %lu part(s)%s",
+              total / 1000, q / 1000, g / 1000, dn / 1000, (unsigned long)parts, gs > 0 ? "" : " (no GPU timing)");
+    uint64_t l = atomic_load(&last);
+    if (!l) { atomic_compare_exchange_strong(&last, &l, now); return; }
+    if (now - l < 5000000000ull || !atomic_compare_exchange_strong(&last, &l, now)) return;
+    const uint64_t k = atomic_exchange(&n, 0), u = atomic_exchange(&untimed, 0), t = k > u ? k - u : 0;
+    const uint64_t ts = atomic_exchange(&tSum, 0), qs = atomic_exchange(&qSum, 0), gsu = atomic_exchange(&gSum, 0),
+                   ds = atomic_exchange(&dSum, 0), ps = atomic_exchange(&pSum, 0);
+    const uint64_t tm = atomic_exchange(&tMax, 0), qm = atomic_exchange(&qMax, 0), gm = atomic_exchange(&gMax, 0), dm = atomic_exchange(&dMax, 0);
+    if (!k) return;
+    nvlog("WindowServer frames (5 s): %llu, avg %.1f ms (max %.1f) = commit->GPU %.1f (max %.1f) + GPU %.1f (max %.1f) + "
+          "end->done %.1f (max %.1f) ms; %.1f parts each; %llu without GPU timing",
+          k, ts / 1000.0 / k, tm / 1000.0, t ? qs / 1000.0 / t : 0, qm / 1000.0, t ? gsu / 1000.0 / t : 0, gm / 1000.0,
+          t ? ds / 1000.0 / t : 0, dm / 1000.0, (double)ps / k, u);
+}
 // The command buffer has finished (or failed): every hold it still has is released, and what was waiting is published.
 static void nvmtl_ws_mark_ready(NVMTLCommandBuffer *cb) {
     NVMTLSurfaceHolds *holds = objc_getAssociatedObject(cb, nvmtl_ws_marks_key);
     if (!holds) return;
+    nvmtl_ws_mark_diag(holds);   // <wsmark>
     NSArray *ids; @synchronized (nvmtl_ws_lock()) { ids = holds->ids.allObjects; }
     NSMutableArray *settled = [NSMutableArray new];
     for (NSNumber *n in ids) nvmtl_ws_release(holds, n.unsignedIntValue, settled);
@@ -445,6 +515,7 @@ static int nvmtl_skip_empty_on(void) {
     double deviceStart = 0, deviceEnd = 0;
     if (!error && _gpuTimingSeen && !_gpuTimingInvalid)
         (void)nvmtl_vk_interval_seconds(&_gpuTiming, &deviceStart, &deviceEnd);
+    nvmtl_ws_frame_diag(self, deviceStart, deviceEnd, _parts.count, error != nil);   // <wsmark>
     nvmtl_surface_finish_writes(self);
     [_completionCondition lock];
     _gpuStart = deviceStart; _gpuEnd = deviceEnd;
@@ -699,6 +770,7 @@ static void nvmtl_gsub_ahead_pass1(void) {
         if (_committed) return;
         [self nvmtlReserveQueue];
         _committed = YES; _commitMarking = YES;
+        _wsCommitNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);   // <wsmark>
         if (!__atomic_load_n(&_rep, __ATOMIC_ACQUIRE)) __atomic_store_n(&_rep, nvmtl_ep_enter(), __ATOMIC_RELEASE);
         [_completionCondition lock]; _cbstatus = MTLCommandBufferStatusCommitted; [_completionCondition unlock];
         [self nvmtlSealPartWithSignal:nil value:0 restart:NO];

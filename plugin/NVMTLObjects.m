@@ -1274,7 +1274,8 @@ static id nvmtl_surface_sync(NVMTLTexture *t) {
 // Intel/AMD: the GPU copies straight between the image and the surface's own pages (imported once per texture);
 // -1 falls back to the staged copy. Called with the surface locked.
 static int nvmtl_surface_host_xfer(NVMTLTexture *r, size_t row, int to_image) {
-    if (r->_hostState < 0 || !nvmtl_vk_surface_host_on() || IOSurfaceGetPlaneCount(r->_surf) > 1) return -1;
+    // a plane of a multi-plane surface copies on the GPU too: off below is the plane's own offset, row its bytesPerRow
+    if (r->_hostState < 0 || !nvmtl_vk_surface_host_on() || (IOSurfaceGetPlaneCount(r->_surf) > 1 && getenv("NVMTL_NO_PLANE_ALIAS"))) return -1;
     void *b0 = IOSurfaceGetBaseAddress(r->_surf);
     if (!r->_hostState) {
         if (nvmtl_vk_surface_host_import(b0, IOSurfaceGetAllocSize(r->_surf), &r->_hostBuf)) {

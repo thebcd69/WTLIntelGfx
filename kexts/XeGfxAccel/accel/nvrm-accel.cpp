@@ -49,6 +49,27 @@ static void               nvAccelWriteStamp(int index, unsigned int value);
 // Per-allocation lines: WindowServer and every Metal app create resources continuously, and logging each one filled the
 // system log (#242). They print only with the -nvaccelverbose boot-arg.
 static bool nvaccel_verbose() { static int v = -1; if (v < 0) { int x = 0; v = PE_parse_boot_argn("-nvaccelverbose", &x, sizeof x) ? 1 : 0; } return v == 1; }
+#ifdef NMX_XEGFX
+// the firmware's boot display: an IONDRVFramebuffer published by UEFIGraphicsFB, with no PCI device above it
+static bool nvXeIsFirmwareDisplay(IOService *fb)
+{
+    IOService *p = fb ? fb->getProvider() : nullptr;
+    if (!p || !p->getMetaClass() || strcmp(p->getMetaClass()->getClassName(), "UEFIGraphicsFB") != 0) return false;
+    for (int hops = 0; p && hops < 8; hops++, p = p->getProvider()) if (p->metaCast("IOPCIDevice")) return false;
+    return true;
+}
+// <gpufb> the framebuffer the panel is attached to: IOFramebuffer gives it an IODisplayConnect (display0) when it
+// comes online. With XeGfxIntelFB 0.9.1 that is GFX0's own framebuffer, and the firmware one is left without a
+// display (2026-11-02 23:02: head 4 stayed on the dead firmware framebuffer, "getPixelInformation ... failed")
+static bool nvXeHasPanel(IOService *fb)
+{
+    OSIterator *it = fb ? fb->getChildIterator(gIOServicePlane) : nullptr; if (!it) return false;
+    bool found = false; OSObject *o;
+    while (!found && (o = it->getNextObject())) { IORegistryEntry *e = OSDynamicCast(IORegistryEntry, o); found = e && e->metaCast("IODisplayConnect"); }
+    it->release();
+    return found;
+}
+#endif
 #define ALOGV(fmt, ...) do { if (nvaccel_verbose()) ALOG(fmt, ##__VA_ARGS__); } while (0)
 #include <libkern/c++/OSSymbol.h>
 #include "nvrm_vram_abi.h"
@@ -89,6 +110,7 @@ static void nvaccelInstallSysctl(void);
 #ifdef NMX_XEGFX
 extern SInt64 gCntPipeInit;
 static void nvXeTraceStart(void);
+static void nvXeFlipShutdown(void);   // <xeflip>
 #endif
 static int gNvAccelArmed = 0;
 // 1 once the headless check restored the plugin name without arming (no NVIDIA display head). The Metal plugin reads it:
@@ -222,6 +244,7 @@ class IOAccelNVRMCarrier : public IOService {
 OSDefineMetaClassAndStructors(IOAccelNVRMCarrier, IOService)
 
 #ifdef NMX_XEGFX
+static IOReturn nvXeWsMark(IOExternalMethodArguments *a);   // <wsmark> selector 1 below
 // WindowServer's sandbox lets it open /dev/dri read-only but never ioctl(2) a device node; it may open IOAccel*
 // user clients. libdrm sends its ioctls here with the minor of its read-only fd, XeGfx checks the caller opened it.
 class IOAccelXeGfxDRMClient : public IOUserClient {
@@ -231,6 +254,7 @@ public:
     IOReturn externalMethod(uint32_t sel, IOExternalMethodArguments *a, IOExternalMethodDispatch *,
                             OSObject *, void *) APPLE_KEXT_OVERRIDE {
         static IOService *res;
+        if (sel == 1) return nvXeWsMark(a);   // <wsmark>
         if (sel != 0 || a->scalarInputCount != 3 || a->scalarOutputCount != 1) return kIOReturnBadArgument;
         if (!res) { OSDictionary *m = serviceMatching("XeGfxResident"); if (m) res = waitForMatchingService(m, 1000ULL * 1000 * 1000); }
         if (!res) return kIOReturnNotAttached;
@@ -345,11 +369,58 @@ public:
 #ifdef NMX_XEGFX
         // the Intel panel is head 4 here, the slot the NVIDIA build gives another GPU's panel (the copy path); a boot
         // framebuffer on any other device is not ours
+        bool bootDisplay = false;
         if (me->fPCI && newService->getProvider() != me->fPCI) {
-            ALOG("%s is on another device -- not ours", newService->getName());
-            return true;
+            // <wtl> The firmware's own framebuffer (.Display_boot under UEFIGraphicsFB, no PCI device above it) is the one
+            // the panel and WindowServer are on when the GPU's IONDRVFramebuffer comes up without a display. Left out,
+            // the panel's framebuffer never got IOAccelTypes and Core Animation composited the whole desktop on the CPU
+            // (CA::OGL::SWContext, ~190% WindowServer CPU). Boot-arg xegfxaccel_gpufb=1 keeps the old rule. </wtl>
+            int gpuOnly = 0; PE_parse_boot_argn("xegfxaccel_gpufb", &gpuOnly, sizeof gpuOnly);
+            if (gpuOnly || !nvXeIsFirmwareDisplay(newService)) {
+                ALOG("%s is on another device -- not ours", newService->getName());
+                return true;
+            }
+            bootDisplay = true;
         }
         idx = 4;
+        if (bootDisplay) {
+            if (me->fRegLock) IOLockLock(me->fRegLock);
+            IOService *held = me->fFBs[4];
+            if (held && held != newService && nvXeHasPanel(held) && !nvXeHasPanel(newService))
+                ALOG("%s is the firmware framebuffer, but head 4 is %s, which has the panel -- left as it is",
+                     newService->getName(), held->getName());
+            else if (held && held != newService && !(me->fFBRegistered & (1u << 4))
+                && OSCompareAndSwapPtr(held, nullptr, (void *volatile *)&me->fFBs[4])) {
+                OSBitAndAtomic(~(1u << 4), &gNvHeadsPublished);
+                if (OSCompareAndSwapPtr(held, nullptr, (void *volatile *)&me->fFB)) held->release();
+                ALOG("%s is the firmware framebuffer the panel is on: it takes head 4 from %s (not registered yet)",
+                     newService->getName(), held->getName());
+                held->release();
+            } else if (held && held != newService)
+                ALOG("%s is the firmware framebuffer the panel is on, but head 4 is %s and %s -- left as it is",
+                     newService->getName(), held->getName(), (me->fFBRegistered & (1u << 4)) ? "already registered" : "changed under us");
+            if (me->fRegLock) IOLockUnlock(me->fRegLock);
+        } else if (IOService *held = me->fFBs[4]) {
+            bool took = false;
+            if (nvXeIsFirmwareDisplay(held) && nvXeHasPanel(newService) && !nvXeHasPanel(held)) {
+                if (me->fRegLock) IOLockLock(me->fRegLock);
+                if (!(me->fFBRegistered & (1u << 4)) && OSCompareAndSwapPtr(held, nullptr, (void *volatile *)&me->fFBs[4])) {
+                    OSBitAndAtomic(~(1u << 4), &gNvHeadsPublished);
+                    if (OSCompareAndSwapPtr(held, nullptr, (void *volatile *)&me->fFB)) held->release();
+                    ALOG("%s is on the GPU and has the panel: it takes head 4 from the firmware framebuffer %s, which has none",
+                         newService->getName(), held->getName());
+                    held->release(); took = true;
+                } else
+                    ALOG("%s is on the GPU and has the panel, but head 4 (%s) is already registered -- restart, then run the stages again",
+                         newService->getName(), held->getName());
+                if (me->fRegLock) IOLockUnlock(me->fRegLock);
+            }
+            if (!took && nvXeIsFirmwareDisplay(held)) {
+                ALOG("%s is on the GPU, but head 4 is already the firmware framebuffer the panel is on (%s) -- not taken",
+                     newService->getName(), held->getName());
+                return true;
+            }
+        }
 #endif
         const char *what = "kept";
         if (idx >= kNvMaxFB) what = "OUT OF RANGE -- this head will get no pipe";
@@ -995,6 +1066,9 @@ public:
     virtual void stop(IOService *provider) APPLE_KEXT_OVERRIDE {
         ALOG("stop");
         stopTemperature();
+#ifdef NMX_XEGFX
+        nvXeFlipShutdown();   // <xeflip> boot framebuffer back on the panel, surfaces let go
+#endif
         IOGraphicsAccelerator2::stop(provider);
     }
     virtual IOReturn callPlatformFunction(const OSSymbol *fn, bool wait, void *p1, void *p2, void *p3, void *p4) APPLE_KEXT_OVERRIDE;
@@ -1526,7 +1600,11 @@ static bool nvXeWaitVblank(IOPCIDevice *pci, unsigned h)
     gIopVblWaitUs = (int)nvXeUs(t0);
     return true;
 }
+#include "xeflip_glue.inc"   // <xeflip> zero-copy scan-out on the Intel panel
 // </wtl>
+#endif
+#ifndef XEFLIP_TRY
+#define XEFLIP_TRY(a, fb, head, s) false
 #endif
 IOReturn NVDisplayPipe::performTransaction(IOAccelDisplayPipeTransaction2 *txn)
 {
@@ -1565,7 +1643,7 @@ IOReturn NVDisplayPipe::performTransaction(IOAccelDisplayPipeTransaction2 *txn)
         if ((unsigned long long)pitch < 4ull * w) NVIOP_FAIL(kIOReturnBadArgument, "resource %ux%u: +0xb8 reads %u, which is not a row pitch (need >= %u) — not a surface buffer", w, h, pitch, 4u * w);
         if ((unsigned long long)h * pitch > vm->fBytes) NVIOP_FAIL(kIOReturnOverrun, "resource %ux%u pitch %u exceeds its %llu bytes", w, h, pitch, (unsigned long long)vm->fBytes);
         src = (const volatile unsigned int *)vm->fKva; fromRes = true;
-    } else if (s && nvAccelIopFlip(fb, head, s, this)) {
+    } else if (s && (XEFLIP_TRY(a, fb, head, s) || nvAccelIopFlip(fb, head, s, this))) {
         OSAddAtomic64(1, &gCntIopSrcSurf); OSAddAtomic64(1, &gCntIopOk); OSAddAtomic64(1, &gCntIopOkHead[head]);
         return kIOReturnSuccess;
     } else if (s) {
@@ -1622,6 +1700,9 @@ IOReturn NVDisplayPipe::performTransaction(IOAccelDisplayPipeTransaction2 *txn)
         volatile unsigned int *dp = d + (unsigned long)y * dpr;
         for (unsigned x = 0; x < words; x++) dp[x] = sp[x];
     }
+#ifdef NMX_XEGFX
+    if (head == 4) nvXeFlipHome();   // <xeflip> the frame just copied is in the boot framebuffer: show that again
+#endif
     OSAddAtomic64(1, fromRes ? &gCntIopSrcRes : &gCntIopSrcSurf);
     const SInt64 n = OSAddAtomic64(1, &gCntIopOk);
     const SInt64 nh = OSAddAtomic64(1, &gCntIopOkHead[head]);
@@ -1756,6 +1837,28 @@ static int    gIopAsync = 1;
 static int gSurfGpuOn = 1;
 static SInt64 gCntSurfMarks, gCntSurfWaits, gCntSurfTimeouts;
 static int gSurfWaitMaxUs;
+// <wsmark> 0.9.5 diagnostics. 2026-11-03 14:55: with the plugin's 'XGDR' marks, 305 swaps timed out waiting for a ready
+// mark and the Dock vanished. A late completion shows as a ready mark for a surface whose timeout already cleared it
+// (ready_late close to timeouts); a hold the plugin never releases shows as timeouts piling up on one surface with no
+// late ready marks. debug.nvaccel_surface_gpu_timeout_ids: the surfaces timed out on, with counts.
+static SInt64 gCntSurfPend, gCntSurfReady, gCntSurfReadyLate;
+struct NVSurfTo { unsigned int id, n; };
+static NVSurfTo gSurfTo[8];
+static char gSurfToStr[200] = "none";
+static unsigned gSurfToLogged, gSurfLateLogged;
+static void nvSurfToNote(unsigned int id)   // surface lock held
+{
+    unsigned i = 0, low = 0;
+    while (i < 8 && gSurfTo[i].id != id) i++;
+    if (i == 8) {
+        for (unsigned j = 1; j < 8; j++) if (gSurfTo[j].n < gSurfTo[low].n) low = j;
+        i = low; gSurfTo[i].id = id; gSurfTo[i].n = 0;
+    }
+    gSurfTo[i].n++;
+    int w = 0;
+    for (unsigned j = 0; j < 8 && w >= 0 && (unsigned)w < sizeof gSurfToStr; j++)
+        if (gSurfTo[j].id) w += snprintf(gSurfToStr + w, sizeof gSurfToStr - (size_t)w, "%s%#x x%u", w ? ", " : "", gSurfTo[j].id, gSurfTo[j].n);
+}
 static const unsigned kSurfGpuWaitMs = 100;   // a GPU that has not finished a composite in 100 ms is hung; flip anyway
 struct NVSurfPending { unsigned int id; unsigned int seq; };
 static NVSurfPending gSurfPend[32];
@@ -1777,15 +1880,18 @@ static void nvSurfMark(unsigned int id, bool pending)
         if (slot == 32 && !gSurfPend[i].id) slot = i;
         if (gSurfPend[i].seq < gSurfPend[oldest].seq) oldest = i;
     }
+    bool late = false;
     if (pending) {
         if (slot == 32) slot = oldest;   // 32 surfaces in flight at once is not a compositor; the oldest mark goes
         gSurfPend[slot].id = id; gSurfPend[slot].seq = ++gSurfPendSeq;
     } else if (slot < 32 && gSurfPend[slot].id == id) {
         gSurfPend[slot].id = 0;
         IOLockWakeup(l, gSurfPend, false);
-    }
+    } else late = true;   // <wsmark> ready for a surface not pending: its timeout cleared it first (or a second ready)
     IOLockUnlock(l);
     OSAddAtomic64(1, &gCntSurfMarks);
+    OSAddAtomic64(1, pending ? &gCntSurfPend : late ? &gCntSurfReadyLate : &gCntSurfReady);
+    if (late && gSurfLateLogged < 16) { gSurfLateLogged++; ALOG("surface marks: ready for surface %#x, which was not pending (after its timeout?) [%u/16]", id, gSurfLateLogged); }
 }
 static bool nvSurfWaitReady(unsigned int id)
 {
@@ -1799,7 +1905,7 @@ static bool nvSurfWaitReady(unsigned int id)
         unsigned i = 0;
         while (i < 32 && gSurfPend[i].id != id) i++;
         if (i == 32) break;
-        if (mach_absolute_time() >= deadline) { gSurfPend[i].id = 0; ready = false; break; }
+        if (mach_absolute_time() >= deadline) { gSurfPend[i].id = 0; ready = false; nvSurfToNote(id); break; }
         waited = true;
         IOLockSleepDeadline(l, gSurfPend, deadline, THREAD_UNINT);
     }
@@ -1809,6 +1915,11 @@ static bool nvSurfWaitReady(unsigned int id)
         if ((int)(ns / 1000) > gSurfWaitMaxUs) gSurfWaitMaxUs = (int)(ns / 1000);
         OSAddAtomic64(1, ready ? &gCntSurfWaits : &gCntSurfTimeouts);
     }
+    if (!ready && gSurfToLogged < 32) {
+        gSurfToLogged++;
+        ALOG("surface marks: no ready mark for surface %#x in %u ms, swapped anyway (pending %lld, ready %lld, late %lld) [%u/32]",
+             id, kSurfGpuWaitMs, (long long)gCntSurfPend, (long long)gCntSurfReady, (long long)gCntSurfReadyLate, gSurfToLogged);
+    }
     return ready;
 }
 SYSCTL_INT(_debug, OID_AUTO, nvaccel_surface_gpu, CTLFLAG_RD | CTLFLAG_LOCKED, &gSurfGpuOn, 0, "1 = WindowServer swaps wait for GPU completion here (same value as nvaccel_surface_gpu_on)");
@@ -1817,6 +1928,11 @@ NVACCEL_CNT(nvaccel_surface_gpu_marks,    gCntSurfMarks,    "pending/ready marks
 NVACCEL_CNT(nvaccel_surface_gpu_waits,    gCntSurfWaits,    "swaps that waited here for their composite to finish");
 NVACCEL_CNT(nvaccel_surface_gpu_timeouts, gCntSurfTimeouts, "swaps whose composite did not finish within 100 ms");
 SYSCTL_INT(_debug, OID_AUTO, nvaccel_surface_gpu_wait_max_us, CTLFLAG_RD | CTLFLAG_LOCKED, &gSurfWaitMaxUs, 0, "longest swap wait for a composite, us");
+NVACCEL_CNT(nvaccel_surface_gpu_pend,       gCntSurfPend,      "pending marks (a WindowServer composite committed)");
+NVACCEL_CNT(nvaccel_surface_gpu_ready,      gCntSurfReady,     "ready marks that cleared a pending surface");
+NVACCEL_CNT(nvaccel_surface_gpu_ready_late, gCntSurfReadyLate, "ready marks for a surface no longer pending (after its timeout)");
+SYSCTL_STRING(_debug, OID_AUTO, nvaccel_surface_gpu_timeout_ids, CTLFLAG_RD | CTLFLAG_LOCKED, gSurfToStr, sizeof gSurfToStr,
+              "surfaces whose swap timed out waiting for a ready mark, with counts (8 most frequent)");
 static SInt64 gCntIopAsync, gCntIopAsyncRefused, gCntIopAsyncDrop;
 SYSCTL_INT(_debug, OID_AUTO, nvaccel_iop_async, CTLFLAG_RW | CTLFLAG_LOCKED, &gIopAsync, 0, "1 = the swap runs on a thread call and completes through signalTransactionInterrupt (Apple's shape); 0 = the earlier synchronous flip");
 NVACCEL_CNT(nvaccel_iop_async_flips,   gCntIopAsync,        "swaps completed asynchronously");
@@ -1862,6 +1978,7 @@ static void nvaccelInstallSysctl(void)
     sysctl_register_oid(&sysctl__debug_nvaccel_iop_blank);      sysctl_register_oid(&sysctl__debug_nvaccel_iop_copy_skip);
 #ifdef NMX_XEGFX
     nvXeVblSysctls();
+    nvXeFlipSysctls();   // <xeflip>
 #endif
     sysctl_register_oid(&sysctl__debug_nvaccel_iop_flip);       sysctl_register_oid(&sysctl__debug_nvaccel_iop_flips);
     sysctl_register_oid(&sysctl__debug_nvaccel_iop_flip_home);  sysctl_register_oid(&sysctl__debug_nvaccel_iop_flip_lock);
@@ -1875,6 +1992,8 @@ static void nvaccelInstallSysctl(void)
     sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu);    sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_on);
     sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_marks); sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_waits);
     sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_timeouts); sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_wait_max_us);
+    sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_pend);     sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_ready);   // <wsmark>
+    sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_ready_late); sysctl_register_oid(&sysctl__debug_nvaccel_surface_gpu_timeout_ids);
     sysctl_register_oid(&sysctl__debug_nvaccel_iop_async_refused); sysctl_register_oid(&sysctl__debug_nvaccel_iop_async_drop);
     sysctl_register_oid(&sysctl__debug_nvaccel_iop_late);
     sysctl_register_oid(&sysctl__debug_nvaccel_iop_ok_h0);      sysctl_register_oid(&sysctl__debug_nvaccel_iop_ok_h1);
@@ -2095,6 +2214,24 @@ static unsigned nvSurfGpuEscape(const struct NVRMSurfShareEsc *p)
     if (p->surfaceID) nvSurfMark(p->surfaceID, (p->plane & 1u) != 0);
     return 0;
 }
+#ifdef NMX_XEGFX
+// <wsmark> WindowServer's completion marks on the Intel GPU. NVK sends them through NVRM's surface escape; ANV exports
+// no nvmtl_nvk_surface_dirty, so the plugin kept WindowServer waiting for every composite to finish (2026-11-03 14:22:
+// 41 % of its main thread in waitUntilCompleted, the desktop at ~30 frames/s). The plugin now sends them on its 'XGDR'
+// connection, which WindowServer's sandbox already allows (ANV's DRM ioctls use it): selector 1, scalars (surface ID,
+// 1 pending / 0 ready) -> status, 0 = taken. Surface 0 is the plugin's probe. Same checks as the escape: WindowServer
+// only, nothing while debug.nvaccel_surface_gpu_on is 0.
+static IOReturn nvXeWsMark(IOExternalMethodArguments *a)
+{
+    if (a->scalarInputCount != 2 || a->scalarOutputCount != 1) return kIOReturnBadArgument;
+    struct NVRMSurfShareEsc e; bzero(&e, sizeof e);
+    e.version = NVRM_SURFSHARE_VERSION;
+    e.surfaceID = (unsigned int)a->scalarInput[0];
+    e.plane = NVRM_SS_PLANE_GPU_MARK | (a->scalarInput[1] ? 1u : 0u);
+    a->scalarOutput[0] = nvSurfGpuEscape(&e);
+    return kIOReturnSuccess;
+}
+#endif
 static IOReturn nvAccelSurfVram(struct NVRMSurfShareEsc *p, task_t task, unsigned cmd)
 {
     if (p->version == NVRM_SURFSHARE_VERSION && cmd == NVRM_ESC_SURF_DIRTY && (p->plane & NVRM_SS_PLANE_GPU_MARK)) {

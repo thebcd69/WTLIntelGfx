@@ -14,6 +14,7 @@
 #include <kern/clock.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOLocks.h>
+#include <IOKit/IOPlatformExpert.h>
 
 #define XIFBLOG(fmt, ...) IOLog("XeGfxIntelFB: " fmt "\n", ##__VA_ARGS__)
 
@@ -62,7 +63,7 @@ static void xifbGuardClear()
 // kmutil places a kext in a kernel collection only with a _kmod_info symbol (Xcode generates it; this build does not)
 #include <mach/kmod.h>
 extern "C" kern_return_t _start(kmod_info_t *ki, void *d); extern "C" kern_return_t _stop(kmod_info_t *ki, void *d);
-extern "C" { KMOD_EXPLICIT_DECL(org.watchthelight.XeGfxIntelFB, "0.9", _start, _stop) }
+extern "C" { KMOD_EXPLICIT_DECL(org.watchthelight.XeGfxIntelFB, "0.9.4", _start, _stop) }
 extern "C" kern_return_t _start(kmod_info_t *ki, void *d) { return KERN_SUCCESS; }
 extern "C" kern_return_t _stop(kmod_info_t *ki, void *d)  { return KERN_SUCCESS; }
 
@@ -139,6 +140,26 @@ static uint32_t xifbMeasureHz()
     return ns ? (uint32_t)(((uint64_t)frames << 16) * 1000000000ull / ns) : 0;
 }
 // the EDID detailed timing nearest the measured rate, so the reported refresh is the panel's exact one
+// <bootvram> The panel's preferred mode (the first detailed timing of the EDID) in XeGfxAGDC's NVRMTiming layout: tag,
+// pixel clock in Hz, h visible/sync start/sync end/total, v the same, refresh in mHz, h and v sync polarity. Without it
+// AGDC answers CoreDisplay's link query (0x921) with upstream's 2560x1600 165 Hz panel. ThinkBook: 3072x1920 60.000 Hz.
+#define XIFB_TIMING_TAG 0x4b350001u
+static bool xifbEdidTiming(const uint8_t *e, int len, uint32_t t[13])
+{
+    if (len < 128) return false;
+    const uint8_t *d = e + 54;
+    uint32_t clk = (d[0] | d[1] << 8) * 10000u; if (!clk) return false;
+    uint32_t ha = d[2] | (d[4] & 0xf0) << 4, hb = d[3] | (d[4] & 0x0f) << 8, va = d[5] | (d[7] & 0xf0) << 4, vb = d[6] | (d[7] & 0x0f) << 8;
+    uint32_t hso = d[8] | (d[11] & 0xc0) << 2, hsw = d[9] | (d[11] & 0x30) << 4;
+    uint32_t vso = (d[10] >> 4) | (d[11] & 0x0c) << 2, vsw = (d[10] & 15) | (d[11] & 3) << 4;
+    if (!ha || !va || !hb || !vb || !hsw || !vsw) return false;
+    uint64_t tot = (uint64_t)(ha + hb) * (va + vb);
+    t[0] = XIFB_TIMING_TAG; t[1] = clk;
+    t[2] = ha; t[3] = ha + hso; t[4] = ha + hso + hsw; t[5] = ha + hb;
+    t[6] = va; t[7] = va + vso; t[8] = va + vso + vsw; t[9] = va + vb;
+    t[10] = (uint32_t)((uint64_t)clk * 1000 / tot); t[11] = (d[17] >> 1) & 1; t[12] = (d[17] >> 2) & 1;
+    return true;
+}
 static uint32_t xifbSnapHz(const uint8_t *e, int len, uint32_t meas)
 {
     uint32_t best = meas, bd = ~0u;
@@ -153,6 +174,39 @@ static uint32_t xifbSnapHz(const uint8_t *e, int len, uint32_t meas)
     for (int i = 0; i < 4; i++) dtd(e + 54 + 18 * i);
     if (len >= 256 && e[128] == 0x02) for (int o = e[130]; o >= 4 && o + 18 <= 127; o += 18) dtd(e + 128 + o);
     return (meas && bd > meas / 50) ? meas : best;    // more than 2 % off: keep the measurement
+}
+
+// <bootvram> The GOP framebuffer on the ThinkBook lies in stolen memory (phys 0x7a800000), outside both GFX0 BARs, so
+// IONDRVFramebuffer on GFX0 finds no VRAM and never comes online: WindowServer's "Creating FB 1 of 1" for the Intel GPU
+// fails ("Failed to open connection to framebuffer") and it falls back to UEFIGraphicsFB's .Display_boot, which has no
+// GPU above it, so IOPresentment stays off (2026-11-02 21:54). The console range as GFX0 device memory lets the boot
+// NDRV find it there. Appended last, so every BAR keeps its index. Boot-arg -xeintelfbnovram skips it.
+// true when GFX0 holds the console range afterwards
+static bool xifbAddConsoleRange(IOService *pci)
+{
+    int off = 0;
+    if (PE_parse_boot_argn("-xeintelfbnovram", &off, sizeof off)) { XIFBLOG("boot vram: off by boot-arg"); return false; }
+    PE_Video v; bzero(&v, sizeof v);
+    if (IOService::getPlatform()->getConsoleInfo(&v) != kIOReturnSuccess || !v.v_baseAddr || !v.v_rowBytes || !v.v_height) {
+        XIFBLOG("boot vram: no console info"); return false;
+    }
+    uint64_t base = v.v_baseAddr, len = v.v_length ? v.v_length : (uint64_t)v.v_rowBytes * v.v_height;
+    OSArray *mem = pci->getDeviceMemory(); unsigned n = mem ? mem->getCount() : 0;
+    for (unsigned i = 0; i < n; i++) {
+        IOMemoryDescriptor *m = OSDynamicCast(IOMemoryDescriptor, mem->getObject(i)); if (!m) continue;
+        uint64_t a = m->getPhysicalAddress();
+        if (base >= a && base + len <= a + m->getLength()) { XIFBLOG("boot vram: console %#llx already in device memory %u", base, i); return true; }
+    }
+    IODeviceMemory *c = IODeviceMemory::withRange((IOPhysicalAddress)base, (IOPhysicalLength)len); if (!c) return false;
+    OSArray *nm = mem ? OSArray::withArray(mem, n + 1) : OSArray::withCapacity(1);
+    bool added = nm && nm->setObject(c);
+    if (added) {
+        pci->setDeviceMemory(nm);
+        XIFBLOG("boot vram: console %lux%lu rowbytes %lu at phys %#llx (%llu B) added as device memory %u", v.v_width,
+                v.v_height, v.v_rowBytes, base, len, n);
+    }
+    OSSafeReleaseNULL(nm); c->release();
+    return added;
 }
 
 
@@ -324,7 +378,91 @@ public:
                 }
         }
         if (!curSetup()) fCurReady = false;
-        return IONDRVFramebuffer::start(provider);
+        bool vram = OSDynamicCast(IOPCIDevice, provider) && xifbAddConsoleRange(provider);
+        bool ok = IONDRVFramebuffer::start(provider);
+        // the name is still the class name here; it becomes ".Display_boot" when the boot NDRV opens it
+        XIFBLOG("IONDRVFramebuffer start %s, name %s", ok ? "ok" : "FAILED", getName());
+        // a GPU's own framebuffer driver names its GPU and its slot; IONDRVFramebuffer does not, and XeGfxAGDC left
+        // GFX0's framebuffer out without it (23:02 "has no IOFBDependentIndex number"). Only with the console here:
+        // a framebuffer without it never comes online and must not be reported.
+        if (ok && vram && !getProperty("IOFBDependentIndex")) {
+            setProperty("IOFBDependentID", provider->getRegistryEntryID(), 64);
+            setProperty("IOFBDependentIndex", 0ULL, 32);
+            XIFBLOG("IOFBDependentID %#llx, IOFBDependentIndex 0", provider->getRegistryEntryID());
+        }
+        uint32_t t[13];
+        if (ok && vram && fEdidLen && !getProperty("NVRMTiming") && xifbEdidTiming(fEdid, fEdidLen, t))
+            if (OSData *d = OSData::withBytes(t, sizeof t)) {
+                setProperty("NVRMTiming", d); d->release();
+                XIFBLOG("NVRMTiming %ux%u, pixel clock %u Hz, totals %ux%u, %u.%03u Hz", t[2], t[6], t[1], t[5], t[9], t[10] / 1000, t[10] % 1000);
+            }
+        return ok;
+    }
+    IODeviceMemory *findVRAM() override {
+        IODeviceMemory *m = IONDRVFramebuffer::findVRAM();
+        static unsigned n; if (++n <= 2) XIFBLOG("findVRAM %u: %s", n, m ? "found" : "none");
+        return m;
+    }
+    // <vbl> The panel's refresh as IOFramebuffer's VBL interrupt. The boot NDRV has none, so IOFramebuffer ran its 30 Hz
+    // stand-in (IOFBWaitCursorPeriod 33333333) and WindowServer composited on that beat: 2026-11-03 16:3x, fps-gaps while a
+    // window was dragged: 324 of 398 frame gaps 30-34 ms, 7 at 15-19 ms -- the desktop capped at 30 frames/s with the GPU,
+    // the present path and WindowServer's waits all ruled out. Here a thread call follows pipe A's frame
+    // counter (0x70040, the one xifbMeasureHz reads) and calls IOFramebuffer's handler when it advances; a counter that
+    // stops (pipe off) is replaced by the measured period, so a registered handler is never left without a beat.
+    // Boot-arg -xeintelfbnovbl keeps the boot NDRV's answer (no VBL).
+    IOFBInterruptProc fVblProc = nullptr; OSObject *fVblTarget = nullptr; void *fVblRef = nullptr;
+    volatile bool fVblEnabled = false, fVblStop = false; thread_call_t fVblCall = nullptr;
+    uint32_t fVblCount = 0; uint64_t fVblLastAbs = 0, fVblPeriodAbs = 0, fVblPollAbs = 0, fVblEarlyAbs = 0;
+    uint64_t fVblFired = 0, fVblSynthetic = 0; int fVblToken = 0;
+    static void vblThunk(thread_call_param_t me, thread_call_param_t) { ((XeGfxIntelFramebuffer *)me)->vblTick(); }
+    void vblTick() {
+        if (fVblStop) return;
+        const uint64_t now = mach_absolute_time();
+        const uint32_t c = rd(0x70040);
+        bool fire = false;
+        if (c != fVblCount) { fVblCount = c; fVblLastAbs = now; fire = true; }
+        else if (now - fVblLastAbs > 2 * fVblPeriodAbs) { fVblLastAbs = now; fire = true; fVblSynthetic++; }
+        if (fire && fVblEnabled && fVblProc) {
+            fVblProc(fVblTarget, fVblRef);
+            if (++fVblFired == 600) XIFBLOG("VBL: 600 refreshes delivered (%llu from the period, the frame counter stopped)", fVblSynthetic);
+        }
+        // shortly before the next refresh, then every 250 us until the counter moves
+        const uint64_t next = fVblLastAbs + fVblPeriodAbs - fVblEarlyAbs;
+        thread_call_enter_delayed(fVblCall, next > now + fVblPollAbs ? next : now + fVblPollAbs);
+    }
+public:
+    IOReturn registerForInterruptType(IOSelect type, IOFBInterruptProc proc, OSObject *target, void *ref, void **iref) override {
+        int off = 0;
+        if (type != kIOFBVBLInterruptType || !fR || !fHz16 || PE_parse_boot_argn("-xeintelfbnovbl", &off, sizeof off))
+            return IONDRVFramebuffer::registerForInterruptType(type, proc, target, ref, iref);
+        if (fVblProc) return kIOReturnBusy;
+        // thread_call_allocate_with_priority and thread_call_cancel_wait are com.apple.kpi.private: a third-party kext
+        // does not link against them (2026-11-03 16:41, kmutil "could not find a kext which exports this symbol")
+        if (!fVblCall) fVblCall = thread_call_allocate(vblThunk, this);
+        if (!fVblCall) return IONDRVFramebuffer::registerForInterruptType(type, proc, target, ref, iref);
+        const uint64_t periodNs = (65536ull * 1000000000ull) / fHz16;
+        nanoseconds_to_absolutetime(periodNs, &fVblPeriodAbs);
+        nanoseconds_to_absolutetime(250000, &fVblPollAbs);
+        nanoseconds_to_absolutetime(1000000, &fVblEarlyAbs);
+        fVblProc = proc; fVblTarget = target; fVblRef = ref; fVblEnabled = true; fVblStop = false;
+        fVblCount = rd(0x70040); fVblLastAbs = mach_absolute_time();
+        thread_call_enter_delayed(fVblCall, fVblLastAbs + fVblPollAbs);
+        if (iref) *iref = &fVblToken;
+        XIFBLOG("VBL: from pipe A's frame counter, %u.%02u Hz (period %llu us)", fHz16 >> 16, ((fHz16 & 0xffff) * 100) >> 16, periodNs / 1000);
+        return kIOReturnSuccess;
+    }
+    IOReturn unregisterInterrupt(void *iref) override {
+        if (iref != &fVblToken) return IONDRVFramebuffer::unregisterInterrupt(iref);
+        fVblStop = true; fVblEnabled = false;   // a tick already running sees fVblStop first and does not re-arm
+        if (fVblCall) thread_call_cancel(fVblCall);
+        fVblProc = nullptr; fVblTarget = nullptr; fVblRef = nullptr;
+        XIFBLOG("VBL: handler removed after %llu refreshes", fVblFired);
+        return kIOReturnSuccess;
+    }
+    IOReturn setInterruptState(void *iref, UInt32 state) override {
+        if (iref != &fVblToken) return IONDRVFramebuffer::setInterruptState(iref, state);
+        fVblEnabled = state != kDisabledInterruptState;
+        return kIOReturnSuccess;
     }
     bool hasDDCConnect(IOIndex ci) override { return fEdidLen ? true : IONDRVFramebuffer::hasDDCConnect(ci); }
     IOReturn getDDCBlock(IOIndex ci, UInt32 block, IOSelect type, IOOptionBits opt, UInt8 *data, IOByteCount *len) override {

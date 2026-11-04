@@ -287,16 +287,24 @@ static void nvdaAgdcDropFB(void) { if (gAgdcFBRef) { gAgdcFBRef->release(); gAgd
 static void nvdaAgdcTargets(IOService **pci, IOService **fb)
 {
     *pci = nullptr; *fb = nullptr;
+    // Not just the first match: the firmware's .Display_boot (under UEFIGraphicsFB, no PCI device above it) is an
+    // IONDRVFramebuffer too, and when it comes first the GPU's own framebuffer was never looked at.
     OSDictionary *m = IOService::serviceMatching(AGDC_FB_CLASS); if (!m) return;
-    IOService *f = IOService::copyMatchingService(m); m->release(); if (!f) return;
-    IOService *p = f->getProvider(); int hops = 0;
-    while (p && !p->metaCast("IOPCIDevice") && hops++ < 8) p = p->getProvider();
-    if (!p || !p->metaCast("IOPCIDevice")) { f->release(); return; }
+    OSIterator *it = IOService::getMatchingServices(m); m->release(); if (!it) return;
+    OSObject *o;
+    while ((o = it->getNextObject())) {
+        IOService *f = OSDynamicCast(IOService, o); if (!f) continue;
+        IOService *p = f->getProvider(); int hops = 0;
+        while (p && !p->metaCast("IOPCIDevice") && hops++ < 8) p = p->getProvider();
+        if (!p || !p->metaCast("IOPCIDevice")) continue;
 #ifdef NMX_XEGFX
-    { OSData *v = OSDynamicCast(OSData, p->getProperty("vendor-id"));
-      if (!v || v->getLength() < 2 || *(const uint16_t *)v->getBytesNoCopy() != AGDC_VENDOR_ID) { f->release(); return; } }
+        { OSData *v = OSDynamicCast(OSData, p->getProperty("vendor-id"));
+          if (!v || v->getLength() < 2 || *(const uint16_t *)v->getBytesNoCopy() != AGDC_VENDOR_ID) continue; }
 #endif
-    gAgdcFBRef = f; *fb = f; *pci = p;
+        f->retain(); gAgdcFBRef = f; *fb = f; *pci = p;
+        break;
+    }
+    it->release();
 }
 
 static int gAgdcScanLogged = 0;

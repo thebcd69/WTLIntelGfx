@@ -2034,16 +2034,52 @@ int nvmtl_vk_surface_dirty(uint32_t surfaceID, uint32_t plane) { return nvmtl_vk
 /* the same mark, given up instead of waiting when the accelerator lock is taken (NVRM_SS_PLANE_TRYLOCK; only an NVAccel
    that publishes NVAccelSurfaceWait is asked): 0 marked, 1 the lock was taken, -1 refused */
 int nvmtl_vk_surface_dirty_try(uint32_t surfaceID, uint32_t plane) { return nvmtl_vk_surface_mark_newest(surfaceID, plane, 0x40000000u); }
+// <wsmark> The same mark where the Vulkan driver has no NVK escape (ANV, the Intel GPU over XeGfx): on the accelerator's
+// 'XGDR' connection, which WindowServer's sandbox already allows (libdrm sends ANV's DRM ioctls on it). Selector 1,
+// scalars (surface ID, 1 pending / 0 ready) -> status, 0 = taken. An accelerator without it (XeGfxAccel before 0.9.4)
+// answers kIOReturnBadArgument: not taken, and WindowServer keeps waiting for its composites itself. Without these marks
+// WindowServer waited for every composite to finish: 41 % of its main thread, ~30 frames/s (2026-11-03 14:22).
+static io_connect_t g_xgdr_mark;
+static uint32_t nvmtl_xgdr_gpu_mark(uint32_t surfaceID, int pending)
+{
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // NVAccel on NVIDIA, NMXAccel over XeGfx (nmx_accel_names.h), as the accelerator lookup above
+        io_service_t s = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("NVAccel"));
+        if (!s) s = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("NMXAccel"));
+        if (!s) { nvlog("WindowServer marks: no NVAccel/NMXAccel service"); return; }
+        kern_return_t kr = IOServiceOpen(s, mach_task_self(), 0x58474452u /* 'XGDR' */, &g_xgdr_mark);
+        IOObjectRelease(s);
+        if (kr != KERN_SUCCESS) { g_xgdr_mark = 0; nvlog("WindowServer marks: 'XGDR' connection refused (%#x)", kr); }
+        else nvlog("WindowServer marks: on the accelerator's 'XGDR' connection (no NVK escape in this Vulkan driver)");
+    });
+    if (!g_xgdr_mark) return 0x80000002u;
+    uint64_t in[2] = { surfaceID, pending ? 1u : 0u }, out = 0x80000002u;
+    uint32_t n = 1;
+    kern_return_t kr = IOConnectCallScalarMethod(g_xgdr_mark, 1, in, 2, &out, &n);
+    if (kr != KERN_SUCCESS || n != 1) {
+        static unsigned logged;
+        if (logged++ < 4) nvlog("WindowServer marks: selector 1 answered %#x (XeGfxAccel before 0.9.4?)", kr);
+        return 0x80000002u;
+    }
+    return (uint32_t)out;
+}
 // WindowServer completion mark (NVAccel nvSurfGpuEscape), on NVK's surface escape: 0 = the kernel took it
 uint32_t nvmtl_vk_surface_gpu_mark(uint32_t surfaceID, int pending)
 {
-    if (!pnvk_surface_dirty || !g_dev) return 0x80000002u;
+    if (!pnvk_surface_dirty) return nvmtl_xgdr_gpu_mark(surfaceID, pending);   // <wsmark>
+    if (!g_dev) return 0x80000002u;
     return pnvk_surface_dirty(g_dev, surfaceID, 0x80000000u | (pending ? 1u : 0u));
 }
 /* 1 when NVAccel publishes NVAccelSurfaceWait: its page-off waits for a surface WindowServer's GPU is still writing */
 int nvmtl_vk_accel_surface_wait(void)
 {
     io_service_t s = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("NVAccel"));
+    // <wsmark> NMXAccel over XeGfx (nmx_accel_names.h) publishes NVAccelSurfaceWait too. Looked up only as NVAccel, the
+    // Intel desktop kept the late release order with its kernel waits on (2026-11-03 15:44: "marked newest after the GPU
+    // finishes"), and every swap that waited in a transaction for a mark the completion thread could only send after
+    // publishing (which needs the accelerator) ran into the 100 ms timeout: 116 timeouts, 116 late ready marks.
+    if (!s) s = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("NMXAccel"));
     if (!s) return 0;
     CFTypeRef v = IORegistryEntryCreateCFProperty(s, CFSTR("NVAccelSurfaceWait"), kCFAllocatorDefault, 0);
     int on = 0;

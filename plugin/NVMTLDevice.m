@@ -160,6 +160,7 @@ id   nvmtl_sass_kernel_for_linked(id function, NSDictionary *mods, NSDictionary 
 BOOL nvmtl_sass_tables_wanted(void);
 int  nvmtl_sass_dispatch(id encoder, MTLSize grid, MTLSize group, uint32_t kind, BOOL hasFallback);
 NSDictionary<NSString *, NSData *> *nvmtl_translate_metallib(NSData *lib, NSDictionary **stages, NSDictionary **airs);
+NSData *nvmtl_compile_library_entry(NSData *air, NSString *ll, NSString *stage, NSString *name, NSString **error);
 void nvmtl_vendor_compile_airs(NSDictionary<NSString *, NSString *> *airs,
                                NSDictionary<NSString *, NSString *> *stages);
 #include <sys/stat.h>
@@ -654,12 +655,20 @@ static void nvmtl_install_hw_resource_pools(id dev)
     NSString *p = @"/System/Library/Frameworks/CoreDisplay.framework/Versions/A/Resources/default.metallib";
     NSData *d = [NSData dataWithContentsOfFile:p];
     if (!d) { nvlog("gpupass probe: cannot read CoreDisplay's metallib"); return; }
-    NSDictionary<NSString *, NSData *> *fns = nvmtl_translate_metallib(d, NULL, NULL);
+    NSDictionary *stages = nil, *airs = nil;
+    NSDictionary<NSString *, NSData *> *fns = nvmtl_translate_metallib(d, &stages, &airs);
     nvlog("gpupass probe: %lu functions translated from CoreDisplay's metallib", (unsigned long)fns.count);
-    NSData *v = fns[@"ViewportToNDC"];
+    // The index holds each entry's AIR bitcode, not SPIR-V; translate it as a library function lookup does.
+    NSData *(^spirv)(NSString *) = ^NSData *(NSString *name) {
+        NSString *why = nil;
+        NSData *s = fns[name] ? nvmtl_compile_library_entry(fns[name], airs[name], stages[name], name, &why) : nil;
+        if (fns[name] && !s) nvlog("gpupass probe: %s did not translate: %s", name.UTF8String, why.UTF8String ?: "?");
+        return s;
+    };
+    NSData *v = spirv(@"ViewportToNDC");
     if (!v) { nvlog("gpupass probe: NO ViewportToNDC — the vertex half is missing"); return; }
     for (NSString *fname in @[@"GPUPass", @"ColorFill", @"TextureCopy"]) {
-        NSData *f = fns[fname];
+        NSData *f = spirv(fname);
         if (!f) { nvlog("gpupass probe: no %s in the translated set", fname.UTF8String); continue; }
         nvk_pipeline pipe; memset(&pipe, 0, sizeof pipe);
         int rc = nvmtl_vk_pipeline_create_depth(v.bytes, v.length, f.bytes, f.length, 1, 0, &pipe);
@@ -1012,17 +1021,31 @@ static int nvmtl_surface_image_create(NVMTLTexture *t, IOSurfaceRef surf, NSUInt
     // <wtl>
     // Intel/AMD: the image is laid over the surface's own pages (explicit linear layout, the surface's bytesPerRow), so
     // what the GPU draws is in the surface when the command buffer completes, and CPU writes need no upload (I-108).
-    if (surf && plane == 0 && IOSurfaceGetPlaneCount(surf) <= 1 && nvmtl_vk_surface_host_on()) {
-        size_t row = IOSurfaceGetBytesPerRow(surf), sh = IOSurfaceGetHeight(surf);
-        if ((size_t)w * (bpp ? bpp : 4) <= row && h <= sh && row % 32 == 0
-            && !nvmtl_vk_surface_host_import(IOSurfaceGetBaseAddress(surf), IOSurfaceGetAllocSize(surf), &t->_hostBuf)) {
-            if (!nvmtl_vk_image_create_buffer_alias(w, h, vkf, bpp, a8, stex, 1, &t->_hostBuf, 0, row, &t->_i)) {
+    // A plane of a multi-plane surface (video: NV12/P010, 4K wallpapers and players) is laid over its own part of the
+    // same pages, at the plane's offset and bytesPerRow; copying a 4K frame in and out on the CPU every frame kept
+    // WindowServer at 200%. NVMTL_NO_PLANE_ALIAS=1 keeps those planes on private images.
+    const int multi = surf && IOSurfaceGetPlaneCount(surf) > 1;
+    if (surf && (multi ? !getenv("NVMTL_NO_PLANE_ALIAS") : plane == 0) && nvmtl_vk_surface_host_on()) {
+        const uint32_t pi = (uint32_t)plane;
+        size_t row = multi ? IOSurfaceGetBytesPerRowOfPlane(surf, pi) : IOSurfaceGetBytesPerRow(surf);
+        size_t sh = multi ? IOSurfaceGetHeightOfPlane(surf, pi) : IOSurfaceGetHeight(surf);
+        const uintptr_t base = (uintptr_t)IOSurfaceGetBaseAddress(surf);
+        const uintptr_t pbase = multi ? (uintptr_t)IOSurfaceGetBaseAddressOfPlane(surf, pi) : base;
+        const size_t off = pbase >= base ? (size_t)(pbase - base) : (size_t)-1;
+        if (off != (size_t)-1 && (size_t)w * (bpp ? bpp : 4) <= row && h <= sh && row % 32 == 0
+            && !nvmtl_vk_surface_host_import((void *)base, IOSurfaceGetAllocSize(surf), &t->_hostBuf)) {
+            if (!nvmtl_vk_image_create_buffer_alias(w, h, vkf, bpp, a8, stex, 1, &t->_hostBuf, off, row, &t->_i)) {
                 t->_hostState = 1; t->_hostImg = YES; t->_surfSeed = IOSurfaceGetSeed(surf); t->_surfSynced = YES;
                 static unsigned n; if (n++ < 8 || n % 2000 == 0)
-                    nvlog("surface %u %ux%u pitch %zu -> an image in the surface's own pages (no copies)", (unsigned)IOSurfaceGetID(surf), w, h, row);
+                    nvlog("surface %u %ux%u plane %u at +%zu pitch %zu -> an image in the surface's own pages (no copies)",
+                          (unsigned)IOSurfaceGetID(surf), w, h, pi, off, row);
                 return 0;
             }
             nvmtl_vk_buffer_destroy(&t->_hostBuf); t->_hostState = 0;
+        } else if (multi) {
+            static unsigned n; if (n++ < 8)
+                nvlog("surface %u plane %u %ux%u: not laid over its pages (offset %zd, row %zu, plane height %zu)",
+                      (unsigned)IOSurfaceGetID(surf), pi, w, h, (ssize_t)off, row, sh);
         }
     }
     // </wtl>
