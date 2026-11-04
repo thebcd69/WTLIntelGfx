@@ -17,6 +17,8 @@ die() { echo "gu605-install: STOP: $*" >&2; exit 1; }
 P=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$P/SHA256SUMS" ] || die "run it from an unzipped gu605-<sha> package (no SHA256SUMS in $P)"
 (cd "$P" && shasum -a 256 -c SHA256SUMS --quiet) || die "package checksum mismatch: download it again"
+# a downloaded zip leaves com.apple.quarantine on every file: WindowServer and kmutil must not see it
+xattr -cr "$P" 2>/dev/null || true
 G=/Library/XeGfx/gu605; EXT=/Library/Extensions; GB=/Library/GPUBundles; KC=/Library/KernelCollections/AuxiliaryKernelExtensions.kc
 BK=/Library/XeGfx/gu605-backup-$(date +%Y%m%d-%H%M%S); mkdir -p "$BK" "$G/logs" "$G/tools"
 KEXTS="XeGfxIntelFB XeGfxAccel XeGfxAGDC XgFbMove"
@@ -79,4 +81,6 @@ for b in $OLD org.watchthelight.XeGfxIntelFB org.watchthelight.XeGfxAccel org.wa
 done
 mv -f "$KC" "$BK/AuxiliaryKernelExtensions.kc.before" 2>/dev/null || true
 mv -f "$NEW" "$KC"
+# the collection the next boot reads is the Preboot copy: kcditto puts the new one there (samwu07's installer does too)
+kcditto > "$BK/kcditto.log" 2>&1 || echo "note: kcditto failed (log $BK/kcditto.log)"
 echo "done. Backup: $BK. Restart to apply. Then: docs/GU605-TEST.md"

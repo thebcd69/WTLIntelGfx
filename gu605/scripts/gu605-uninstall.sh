@@ -28,5 +28,6 @@ if [ ${#BIDS[@]} -gt 0 ]; then
   INS=$(kmutil inspect -a x86_64 -A "$NEW" 2>/dev/null)
   for b in $KEEP; do printf '%s\n' "$INS" | grep -E "^$b[[:space:]]" > /dev/null || die "$b would be missing (old collection kept)"; done
   mv -f "$KC" "$RM/AuxiliaryKernelExtensions.kc.before"; mv -f "$NEW" "$KC"
+  kcditto > "$RM/kcditto.log" 2>&1 || echo "note: kcditto failed (log $RM/kcditto.log)"
 fi
 echo "removed to $RM (scripts and logs stay in /Library/XeGfx/gu605). Restart to apply."
