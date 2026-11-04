@@ -222,3 +222,70 @@ static bool xifbBacklightSet(XifbBacklight *b, uint32_t percent)
     if (gXifbAuxLock) IOLockUnlock(gXifbAuxLock);
     return ok;
 }
+
+// ---- 240 Hz question: what the firmware trained the eDP link to, and which modes the panel offers ----
+// DPCD ranges read once at start (read-only) and published as "GU605DPCD" (pairs of 16 bytes per start address below)
+static const uint32_t kXifbDpcdRanges[] = { 0x000, 0x010, 0x060, 0x070, 0x0b0, 0x100, 0x110, 0x160, 0x170, 0x1b0, 0x200, 0x700 };
+static void xifbGu605LinkReport(IOService *fb)
+{
+    uint8_t all[sizeof kXifbDpcdRanges / sizeof kXifbDpcdRanges[0]][16];
+    bzero(all, sizeof all);
+    if (gXifbAuxLock) IOLockLock(gXifbAuxLock);
+    for (unsigned i = 0; i < sizeof kXifbDpcdRanges / sizeof kXifbDpcdRanges[0]; i++) xifbDpcdRead(kXifbDpcdRanges[i], all[i], 16);
+    if (gXifbAuxLock) IOLockUnlock(gXifbAuxLock);
+    if (OSData *d = OSData::withBytes(all, sizeof all)) { fb->setProperty("GU605DPCD", d); d->release(); }
+    const uint8_t *cap = all[0], *rates = all[1], *dsc = all[2], *psr = all[3], *pr = all[4], *cfg = all[5], *cfg2 = all[6],
+                  *dscen = all[7], *psrcfg = all[8], *prcfg = all[9], *st = all[10];
+    // eDP 1.4 rate table (DPCD 0x010.., 16-bit LE in 200 kHz units) and the selected entry (0x115) when LINK_BW_SET is 0
+    char tbl[96] = {}; size_t o = 0;
+    for (int i = 0; i < 8; i++) { unsigned v = rates[2 * i] | rates[2 * i + 1] << 8; if (v) o += snprintf(tbl + o, sizeof tbl - o, "%s%u", o ? "," : "", v / 5); }
+    unsigned bw = cfg[0], lanes = cfg[1] & 0x1f, sel = cfg2[5] & 7;
+    unsigned mbps = bw ? bw * 270 : ((rates[2 * sel] | rates[2 * sel + 1] << 8) / 5);
+    XIFBLOG("gu605 link: DPCD rev %02x, max rate 0x%02x, max lanes %u, eDP rate table {%s} Mbit/s per lane; "
+            "trained LINK_BW_SET 0x%02x RATE_SELECT %u -> %u Mbit/s x %u lanes (%s), lane status %02x %02x, "
+            "DSC sink support %02x (enabled %02x), PSR caps %02x %02x (cfg %02x), panel replay caps %02x (cfg %02x)",
+            cap[0], cap[1], cap[2] & 0x1f, tbl, bw, sel, mbps, lanes, mbps * lanes >= 25920 ? "HBR3 x4 class" : "below HBR3 x4",
+            st[2], st[3], dsc[0], dscen[0], psr[0], psr[1], psrcfg[0], pr[0], prcfg[0]);
+    fb->setProperty("GU605LinkMbpsPerLane", mbps, 32);
+    fb->setProperty("GU605LinkLanes", lanes, 32);
+    fb->setProperty("GU605DSCEnabled", dscen[0], 8);
+}
+
+// every timing the EDID offers: base-block and CTA DTDs (pixel clock <= 655.35 MHz, so a 2560x1600 240 Hz mode cannot
+// be one) and DisplayID type I (0x03) / type VII (0x22) detailed timings in a DisplayID extension (where a 240 Hz
+// panel has to put its fast mode). Logged and published as "GU605Modes".
+static void xifbGu605Modes(IOService *fb, const uint8_t *e, int len)
+{
+    char out[640] = {}; size_t o = 0;
+    auto add = [&](const char *src, uint64_t hz10k, uint32_t ha, uint32_t ht, uint32_t va, uint32_t vt) {
+        if (!hz10k || !ht || !vt || o >= sizeof out - 48) return;
+        uint64_t mhz = hz10k * 10000ull * 1000ull / ((uint64_t)ht * vt);   // milli-Hz
+        o += snprintf(out + o, sizeof out - o, "%s%s %ux%u@%llu.%03llu pclk %llu.%02llu MHz", o ? "; " : "", src, ha, va,
+                      mhz / 1000, mhz % 1000, hz10k / 100, hz10k % 100);
+    };
+    auto dtd = [&](const char *src, const uint8_t *d) {
+        uint32_t clk = d[0] | d[1] << 8; if (!clk) return;
+        uint32_t ha = d[2] | (d[4] & 0xf0) << 4, hb = d[3] | (d[4] & 0x0f) << 8, va = d[5] | (d[7] & 0xf0) << 4, vb = d[6] | (d[7] & 0x0f) << 8;
+        add(src, clk, ha, ha + hb, va, va + vb);
+    };
+    for (int i = 0; i < 4 && len >= 128; i++) dtd("DTD", e + 54 + 18 * i);
+    if (len >= 256 && e[128] == 0x02) for (int off = e[130]; off >= 4 && off + 18 <= 127; off += 18) dtd("CTA-DTD", e + 128 + off);
+    if (len >= 256 && e[128] == 0x70) {
+        const uint8_t *x = e + 129; int n = x[1], p = 4;   // version, bytes in section, product type, extension count
+        while (p + 3 <= n + 4 && p + 3 < 126) {
+            uint8_t tag = x[p], blen = x[p + 2]; const uint8_t *b = x + p + 3;
+            if ((tag == 0x03 || tag == 0x22) && blen >= 20) for (int q = 0; q + 20 <= blen && p + 3 + q + 20 <= 126; q += 20) {
+                const uint8_t *t = b + q;
+                uint64_t pc = (uint64_t)(t[0] | t[1] << 8 | t[2] << 16) + 1;   // type I: 10 kHz units; type VII: 1 kHz units
+                if (tag == 0x22) pc = (pc + 5) / 10;
+                uint32_t ha = (t[4] | t[5] << 8) + 1, hb = (t[6] | t[7] << 8) + 1, va = (t[12] | t[13] << 8) + 1, vb = (t[14] | t[15] << 8) + 1;
+                add(tag == 0x22 ? "DisplayID-VII" : "DisplayID-I", pc, ha, ha + hb, va, va + vb);
+            }
+            if (!blen && !tag) break;
+            p += 3 + blen;
+        }
+    }
+    XIFBLOG("gu605 EDID modes: %s", o ? out : "(none decoded)");
+    fb->setProperty("GU605Modes", o ? out : "none");
+    if (len > 0) if (OSData *d = OSData::withBytes(e, (unsigned)len)) { fb->setProperty("GU605EDID", d); d->release(); }
+}

@@ -22,6 +22,10 @@ sec() { echo; echo "===== $* ====="; }
   sec "XeGfx driver log"; sysctl -b debug.xegfx_log 2>/dev/null | tail -400
   sec "ioreg XeGfxResident (probe, GT, exec, store)"; ioreg -l -w0 -r -c XeGfxResident 2>/dev/null | grep -E 'XeGfx(Probe|Gt|Exec|Store|Post|Stage)'
   sec "ioreg framebuffers"; ioreg -l -w0 -r -c IOFramebuffer -d 3 2>/dev/null | grep -E '\+-o|IOFBDependent|NVRMTiming|IOFBCurrentPixel|IOFBConfig|display0|"model"|backlight|IODisplayParameters' | head -80
+  sec "240 Hz: panel link, DSC, EDID modes (XeGfxIntelFB)"
+  ioreg -l -w0 -r -c XeGfxIntelFramebuffer -d 1 2>/dev/null | grep -E '"GU605(Modes|LinkMbpsPerLane|LinkLanes|DSCEnabled|MeasuredHz16|DPCD|EDID)"'
+  log show --last boot --style compact --predicate 'process == "kernel" AND eventMessage CONTAINS "gu605"' 2>/dev/null | tail -40
+  for f in "$L"/boot-*/stages/display-decoded.txt; do [ -f "$f" ] && { echo "--- $f"; cat "$f"; }; done 2>/dev/null | tail -60
   sec "ioreg NMXAccel"; ioreg -l -w0 -r -c NMXAccel -d 1 2>/dev/null | head -60
   sec "ioreg GPUs"; ioreg -l -w0 -r -c IOPCIDevice -d 1 2>/dev/null | grep -E '\+-o (GFX0|PXSX|PEG|IGPU|GFX)|"device-id"|"vendor-id"|"class-code"|xgfbmove|"model"' | head -40
   sec "displays"; system_profiler SPDisplaysDataType 2>/dev/null

@@ -19,7 +19,7 @@ harici monitör, 3) bonus: Standard (NullMoth ile birlikte), 4) DDC (ayrı, en s
 | Ultimate aynı config ile bozulmaz | — | **Evet**: Intel framebuffer panel iGPU'da değilse başlamaz, koşucu hiçbir şey yapmaz | yüksek |
 | 2. Eco: sol USB-C harici (DP alt mode) | hiçbir i915-on-XNU projesinde yok | **Bugün yok**; iki yol (§8) | düşük |
 | 3. Standard (NullMoth ile birlikte) | denenmedi | dahili panel yazılımsal masaüstü: olası; Intel hızlandırma: ad çakışmaları nedeniyle şimdilik kapalı | düşük |
-| Panel 240 Hz | hiçbir yerde | firmware'in yaktığı hız (büyük olasılıkla 60 Hz; ölçülür) | — |
+| Panel 240 Hz (dahili / harici) | hiçbir yerde | mevcut tasarım firmware hızında kalır (büyük olasılıkla 60 Hz); 240 Hz = i915 display yolu, §11 | dahili orta (haftalar), harici düşük-orta |
 
 ## 2. Temel aldığımız işler
 
@@ -130,6 +130,46 @@ biri (TC1-TC4). Hangisi olduğu stage 2'nin yeni salt-okunur dökümüyle belirl
 | 3 | Standard (isteğe bağlı) | stage 1-2 | yazılımsal masaüstü dahili panelde |
 
 Her açılışta özet `EFI/GU605/last-boot.txt`'e (Windows'tan okunur); `gu605-collect.sh` tek dosya rapor.
+
+## 11. 240 Hz planı (dahili panel ve sol USB-C)
+
+**Sayılar.** 2560x1600@240 (CVT-RB2 benzeri toplamlar ~2640x1646) ≈ **1043 MHz** piksel saati: 8 bpc'de 25,0
+Gbit/s, 10 bpc'de 31,3 Gbit/s. MTL'de eDP portu A (C10 PHY) en çok **HBR3 x4 = 25,92 Gbit/s** (8b/10b sonrası) taşır →
+**8 bpc DSC'siz sığar (%~97, sınırda), 10 bpc DSC ister.** 2560x1440@240 (PG27AQDM) ≈ **938 MHz**: 8 bpc 22,5 Gbit/s →
+HBR3 **x4** ile DSC'siz sığar; alt mode pin ataması 2 şerit DP verirse (pin D, USB3 ile paylaşım) HBR3 x2 = 12,96
+Gbit/s → **DSC şart** (PG27AQDM DSC destekler). Windows ikisini de bu iGPU'dan 240 Hz sürüyor: donanım yeterli.
+
+**Firmware hangi hızı yakar?** EDID'nin 18 baytlık DTD'si en çok 655,35 MHz piksel saati taşır, yani 240 Hz kipi
+yalnız bir DisplayID uzantısında (tip I/VII) ya da VBT'nin "generic DTD" bloğunda olabilir. GOP çoğunlukla taban
+DTD'yi (genelde 60 Hz) kullanır; samwu07'nin 120 Hz paneli de 60 Hz'de açıldı. **Beklenti: GU605 firmware'i paneli
+60 Hz'de bırakır (240 Hz yakma olasılığı düşük, ~%15).** XeGfx mode-set yapmadığından mevcut tasarım firmware hızında
+kalır; VBL kaynağı ölçülen hızı izler (240 Hz yakılmışsa 240 Hz bildirilir).
+
+**İlk test bunu yanıtlar (Eco, `ECO_LEVEL=metal`):** stage 2 her lit transcoder için htotal/vtotal, blanking, sync,
+pipe kaynağı, 200 ms kare sayacıyla **ölçülen Hz**, buradan **piksel saati**, `TRANS_DDI_FUNC_CTL`'den **bpc ve şerit
+sayısı**, VRR (`TRANS_VRR_*`), PSR/PSR2, **DSC** (`ICL_PIPE_DSS_CTL1/2` A/B, eDP DSS) kaydeder; XeGfxIntelFB açılışta
+DPCD'den **eğitilmiş link hızı/şerit** (0x100/0x101, eDP oran tablosu 0x010 + RATE_SELECT 0x115), sink DSC/PSR/panel
+replay yetenek ve durumlarını ve EDID'deki **tüm kipleri** (DTD, CTA, DisplayID I/VII) yazar (`GU605DPCD`, `GU605Modes`,
+`GU605EDID`). Hepsi `gu605-collect.sh` raporunda ve `display-decoded.txt`'te.
+
+**Firmware 60 Hz bırakırsa yollar (ucuzdan pahalıya):**
+1. *Kesintisiz yalnız-zamanlama değişimi* — 60 Hz kipi 240 Hz ile aynı piksel saatinde, yalnız uzun dikey boşlukla
+   yapılmışsa (VRR tarzı; probe'da 60 Hz'in piksel saati ≈1043 MHz çıkarsa) yalnız `TRANS_VTOTAL/VBLANK/VSYNC` (ya da
+   VRR vmin/vmax) vblank'te yeniden yazılır; link ve PLL aynı kalır. Günler. Olasılık düşük.
+2. *Elle tam mode-set (i915'siz)* — CDCLK'ı ≥ piksel saati/2 ≈ 522 MHz'e çıkarmak (PCode + CDCLK_CTL), C10 PLL'i
+   yeniden programlamak, gerekirse HBR3 x4'e link eğitimi (DPCD 0x100-0x103, eğitim desenleri), M/N, transcoder
+   zamanlamaları, DBUF/watermark, PSR kapalı. i915'in yaptığını kopyalamak demek; hata payı yüksek. Önerilmez.
+3. *i915 display'i açmak (Aşama 3b ile aynı iş)* — `xegfx_no_display=0`, eDP'de fastboot yerine 240 Hz kipine mode-set,
+   DMC gömülü, DRM KMS → IOFramebuffer köprüsü (mod listesi, mod değişimi, flip). Sol USB-C harici ekran için de
+   zaten gereken yol; ikisi tek işte çözülür. **Önerilen yol.** Haftalar.
+
+**Kompozisyon da sınır:** 240 Hz tarama, 240 fps masaüstü demek değil. samwu07 ölçümlerinde WindowServer kare başına
+~3 komut tamponu × ~3,5 ms harcıyor (≈ 100 fps tavan); 240 fps için eklentide bekleme/gönderim yükünün azaltılması
+ve sıfır-kopya flip gerekir.
+
+**Hüküm:** dahili 240 Hz — mevcut tasarımla yalnız firmware zaten 240 Hz yakıyorsa (düşük olasılık); i915 display
+yoluyla **uygulanabilir (orta güven), haftalar**. Harici 1440p240 sol USB-C — i915 display + Type-C + gerekirse DSC;
+**düşük-orta güven, haftalar**, ek olarak DP alt mode girişinin macOS'ta sürücüsüz gerçekleşmesi şartı.
 
 ## Kaynaklar
 

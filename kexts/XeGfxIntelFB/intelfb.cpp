@@ -439,7 +439,12 @@ public:
                             fHz16 >> 16, ((fHz16 & 0xffff) * 100) >> 16);
                     gRegs = nullptr; fMmio = m; fR = (volatile uint32_t *)m->getVirtualAddress();
                     // GU605: AUX A stays reachable for the DPCD backlight (serialised by gXifbAuxLock)
-                    if (fGu605) { if (!gXifbAuxLock) gXifbAuxLock = IOLockAlloc(); gRegs = fR; xifbBacklightProbe(&fBl, fEdid, fEdidLen); }
+                    if (fGu605) {
+                        if (!gXifbAuxLock) gXifbAuxLock = IOLockAlloc();
+                        gRegs = fR; xifbBacklightProbe(&fBl, fEdid, fEdidLen);
+                        xifbGu605LinkReport(this); xifbGu605Modes(this, fEdid, fEdidLen);   // the 240 Hz question
+                        setProperty("GU605MeasuredHz16", meas, 32);
+                    }
                 }
         }
         if (!curSetup()) fCurReady = false;

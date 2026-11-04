@@ -14,6 +14,7 @@
 #include <IOKit/pci/IOPCIDevice.h>
 #include <architecture/i386/pio.h>
 #include <kern/thread_call.h>
+#include <kern/clock.h>
 #include <libkern/c++/OSDictionary.h>
 #include <libkern/c++/OSNumber.h>
 #include <mach/kmod.h>
@@ -275,6 +276,48 @@ xg_probe_gu605_display(OSDictionary *d, volatile uint32_t *r)
 	}
 	xg_put(d, "port-buf-ctl1-a", r[0x64004 / 4]);
 	xg_put(d, "port-buf-ctl1-b", r[0x64104 / 4]);
+	/* 240 Hz question: everything about the mode the firmware lit, per transcoder (A..D, 0x1000 apart): blanking and
+	 * sync, pipe source size, VRR, eDP PSR/PSR2, and the DSC engines (pipe A/B, display 12+: ICL_PIPE_DSS_CTL1/2 at
+	 * 0x78000/0x78004 and 0x78200/0x78204; the old eDP-transcoder pair at 0x67400/0x67404). Linux i915 layouts. */
+	for (int t = 0; t < 4; t++) {
+		const uint32_t o = t * 0x1000;
+		snprintf(k, sizeof(k), "hblank-%c", tr[t]);			xg_put(d, k, r[(0x60004 + o) / 4]);
+		snprintf(k, sizeof(k), "hsync-%c", tr[t]);			xg_put(d, k, r[(0x60008 + o) / 4]);
+		snprintf(k, sizeof(k), "vblank-%c", tr[t]);			xg_put(d, k, r[(0x60010 + o) / 4]);
+		snprintf(k, sizeof(k), "vsync-%c", tr[t]);			xg_put(d, k, r[(0x60014 + o) / 4]);
+		snprintf(k, sizeof(k), "pipesrc-%c", tr[t]);			xg_put(d, k, r[(0x6001c + o) / 4]);
+		snprintf(k, sizeof(k), "vrr-ctl-%c", tr[t]);			xg_put(d, k, r[(0x60420 + o) / 4]);
+		snprintf(k, sizeof(k), "vrr-vmax-%c", tr[t]);			xg_put(d, k, r[(0x60424 + o) / 4]);
+		snprintf(k, sizeof(k), "vrr-vmin-%c", tr[t]);			xg_put(d, k, r[(0x60434 + o) / 4]);
+		snprintf(k, sizeof(k), "vrr-flipline-%c", tr[t]);		xg_put(d, k, r[(0x60438 + o) / 4]);
+	}
+	xg_put(d, "psr-ctl-A", r[0x60800 / 4]);
+	xg_put(d, "psr2-ctl-A", r[0x60900 / 4]);
+	xg_put(d, "dss-ctl1-pipe-A", r[0x78000 / 4]);
+	xg_put(d, "dss-ctl2-pipe-A", r[0x78004 / 4]);
+	xg_put(d, "dss-ctl1-pipe-B", r[0x78200 / 4]);
+	xg_put(d, "dss-ctl2-pipe-B", r[0x78204 / 4]);
+	xg_put(d, "dss-ctl1-edp", r[0x67400 / 4]);
+	xg_put(d, "dss-ctl2-edp", r[0x67404 / 4]);
+	/* the refresh each lit pipe really runs at: its frame counter over 200 ms (pixel clock = htotal * vtotal * Hz) */
+	{
+		uint32_t f0[4], f1[4];
+		uint64_t t0 = mach_absolute_time(), t1, ns;
+		for (int p = 0; p < 4; p++)
+			f0[p] = r[(0x70040 + p * 0x1000) / 4];
+		IOSleep(200);
+		for (int p = 0; p < 4; p++)
+			f1[p] = r[(0x70040 + p * 0x1000) / 4];
+		t1 = mach_absolute_time();
+		absolutetime_to_nanoseconds(t1 - t0, &ns);
+		for (int p = 0; p < 4; p++) {
+			if (!(r[(0x70008 + p * 0x1000) / 4] & 0x80000000u))
+				continue;
+			uint64_t mhz = ns ? (uint64_t)(f1[p] - f0[p]) * 1000000000000ull / ns : 0;	/* milli-Hz */
+			snprintf(k, sizeof(k), "refresh-mhz-%c", tr[p]);	xg_put(d, k, mhz, 64);
+		}
+		xg_put(d, "refresh-window-ns", ns, 64);
+	}
 	/* south display PWM, in case the firmware drives the panel's backlight that way after all */
 	xg_put(d, "blc-pwm-ctl", r[0xc8250 / 4]);
 	xg_put(d, "blc-pwm-freq", r[0xc8254 / 4]);

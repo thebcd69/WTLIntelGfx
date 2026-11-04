@@ -25,6 +25,14 @@ test kartı: `docs/GU605-TEST.md`; EFI farkı: `docs/GU605-EFI-CHANGES.md`.
   ANV), `pack` (prerelease). İlk denemede Intel runner hiç alınamadı; Intel işi yine çalışmazsa paket upstream
   v0.0.47 XeGfx.kext'ini (yayın notundaki SHA-256 ile doğrulanmış) kullanır ve Mesa ANV'siz çıkar (koşucu aşama 6'da durur).
 
+## 240 Hz (sahibin hedefi: dahili ve harici 240 Hz)
+- Mevcut tasarım mode-set yapmaz: panel firmware'in yaktığı hızda kalır; 240 Hz kipi DTD'ye sığmadığı için (1043 MHz >
+  655 MHz) firmware'in 60 Hz yakması bekleniyor. Ayrıntı ve yollar: `docs/IGPU-FEASIBILITY.md` §11.
+- İlk test (Eco, `ECO_LEVEL=metal`) bunu ölçer: stage 2'de zamanlamalar, ölçülen Hz, piksel saati, bpc, şerit, DSC,
+  VRR, PSR; XeGfxIntelFB'de DPCD link hızı/şerit, DSC/PSR/panel replay ve EDID kip listesi (`GU605Modes`).
+- Plan: 60 Hz piksel saati 240 Hz ile aynıysa yalnız zamanlama değişimi (günler); değilse i915 display yolu (Aşama 3b
+  ile birlikte, haftalar) — dahili 240 Hz ve sol USB-C 1440p240 aynı işle gelir.
+
 ## Sıradaki adım
 1. CI yeşil → `proposed/EFI/OC/Kexts/XeGfx.kext` doldur, firmware hash'lerini `gu605/firmware.lock`'a sabitle.
 2. Sahibin testi: `docs/GU605-TEST.md` (Ultimate 1 açılış, Eco 1 açılış, isteğe bağlı Standard).

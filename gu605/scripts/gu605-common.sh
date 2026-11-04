@@ -84,6 +84,22 @@ probe_decode() {
       "$([ $((v & 0x80000000)) -ne 0 ] && echo on || echo off)" "$([ $((p & 0x80000000)) -ne 0 ] && echo on || echo off)" \
       $(( (s & 0xFFFF) + 1 )) $(( ((s >> 16) & 0xFFFF) + 1 )) $((u & 0xFFFFF000)) "$d" $(( (d >> 27) & 0xF ))
   done
+  # the 240 Hz question: timings, measured refresh, pixel clock, bpc, lanes, DSC, VRR, PSR for each lit transcoder
+  for t in A B C D; do
+    v=$(pk "transconf-$t"); [ -n "$v" ] && [ $((v & 0x80000000)) -ne 0 ] || continue
+    h=$(pk "htotal-$t"); vt=$(pk "vtotal-$t"); m=$(pk "refresh-mhz-$t"); d=$(pk "trans-ddi-func-ctl-$t")
+    ha=$(( (h & 0xFFFF) + 1 )); ht=$(( (h >> 16) + 1 )); va=$(( (vt & 0xFFFF) + 1 )); vtt=$(( (vt >> 16) + 1 ))
+    m=${m:-0}; pclk=$(( ht * vtt * m / 1000000 ))   # kHz
+    bpc=$(( (d >> 20) & 7 )); case $bpc in 0) bpc=8;; 1) bpc=10;; 2) bpc=6;; 3) bpc=12;; *) bpc="?$bpc";; esac
+    printf 'pipe %s mode: %dx%d active, %dx%d total, %d.%03d Hz measured, pixel clock ~%d.%03d MHz, %s bpc, DDI port width x%d, mode select %d\n' \
+      "$t" $ha $va $ht $vtt $((m / 1000)) $((m % 1000)) $((pclk / 1000)) $((pclk % 1000)) "$bpc" $(( ((d >> 1) & 7) + 1 )) $(( (d >> 24) & 7 ))
+    printf '  VRR ctl 0x%08X vmin %s vmax %s flipline %s\n' "$(pk "vrr-ctl-$t")" "$(pk "vrr-vmin-$t")" "$(pk "vrr-vmax-$t")" "$(pk "vrr-flipline-$t")"
+  done
+  v=$(pk psr-ctl-A); [ -n "$v" ] && printf 'eDP PSR ctl 0x%08X (%s), PSR2 ctl 0x%08X (%s)\n' "$v" "$([ $((v & 0x80000000)) -ne 0 ] && echo on || echo off)" \
+    "$(pk psr2-ctl-A)" "$([ $(( $(pk psr2-ctl-A) & 0x80000000 )) -ne 0 ] && echo on || echo off)"
+  v=$(pk dss-ctl2-pipe-A); [ -n "$v" ] && printf 'DSC pipe A: DSS_CTL2 0x%08X (VDSC0 %s, VDSC1 %s), DSS_CTL1 0x%08X; pipe B DSS_CTL2 0x%08X; eDP DSS_CTL2 0x%08X\n' \
+    "$v" "$([ $((v & 0x80000000)) -ne 0 ] && echo on || echo off)" "$([ $((v & 0x8000)) -ne 0 ] && echo on || echo off)" \
+    "$(pk dss-ctl1-pipe-A)" "$(pk dss-ctl2-pipe-B)" "$(pk dss-ctl2-edp)"
   for k in a b tc1 tc2 tc3 tc4; do v=$(pk "ddi-buf-ctl-$k"); [ -n "$v" ] && printf 'DDI %s buffer %s (0x%08X)\n' "$k" "$([ $((v & 0x80000000)) -ne 0 ] && echo ON || echo off)" "$v"; done
   for n in 1 2 3 4; do
     v=$(pk "tcss-ddi-status-tc$n"); b=$(pk "port-buf-ctl1-tc$n"); [ -n "$v" ] || continue
@@ -91,4 +107,5 @@ probe_decode() {
       "$n" $((v & 1)) $(((v >> 1) & 1)) $(((v >> 2) & 1)) $(((v >> 25) & 0xF)) $(((b >> 6) & 1)) $(((b >> 5) & 1)) $(((b >> 4) & 1)) "$v" "$b"
   done
   v=$(pk blc-pwm-ctl); [ -n "$v" ] && printf 'south PWM backlight: ctl 0x%08X freq %s duty %s\n' "$v" "$(pk blc-pwm-freq)" "$(pk blc-pwm-duty)"
+  return 0
 }
