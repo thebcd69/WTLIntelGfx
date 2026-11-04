@@ -512,6 +512,35 @@ xg_env_default(const char *key, const char *val)
 	strlcat(xg_env, kv, sizeof(xg_env));
 }
 
+/* key=val, replacing any earlier value (the first match wins in xg_env_lookup) */
+static void
+xg_env_force(const char *key, const char *val)
+{
+	char out[sizeof(xg_env)], kv[96];
+	size_t kl = strlen(key), o = 0;
+	const char *p = xg_env;
+
+	while (*p) {
+		while (*p == ' ')
+			p++;
+		const char *t = p;
+		while (*p && *p != ' ')
+			p++;
+		if ((size_t)(p - t) > kl && strncmp(t, key, kl) == 0 && t[kl] == '=')
+			continue;	/* dropped */
+		if (p > t && o + (size_t)(p - t) + 2 < sizeof(out)) {
+			if (o)
+				out[o++] = ' ';
+			memcpy(out + o, t, (size_t)(p - t));
+			o += (size_t)(p - t);
+		}
+	}
+	out[o] = 0;
+	snprintf(kv, sizeof(kv), "%s%s=%s", o ? " " : "", key, val);
+	strlcat(out, kv, sizeof(out));
+	strlcpy(xg_env, out, sizeof(xg_env));
+}
+
 static void
 xg_kms_decide(void)
 {
@@ -534,8 +563,9 @@ xg_kms_decide(void)
 	xg_kms_on = why == nullptr ? 1 : 0;
 	if (xg_kms_on == 1) {
 		/* xeflip and the accelerator write the scanout behind i915's back: nothing may cache or skip frames */
-		xg_env_default("compat.linuxkpi.i915_disable_display", "0");
-		xg_env_default("compat.linuxkpi.i915_xegfx_no_display", "0");
+		/* _start's default env turns the display off by disable_display=1: that one must go */
+		xg_env_force("compat.linuxkpi.i915_disable_display", "0");
+		xg_env_force("compat.linuxkpi.i915_xegfx_no_display", "0");
 		xg_env_default("compat.linuxkpi.i915_enable_psr", "0");
 		xg_env_default("compat.linuxkpi.i915_enable_fbc", "0");
 		xg_env_default("compat.linuxkpi.i915_enable_dc", "0");

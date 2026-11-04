@@ -10,7 +10,7 @@
 name: gu605
 on:
   push:
-    branches: [gu605-mtl]
+    branches: [gu605-mtl, gu605-display]
   workflow_dispatch:
     inputs:
       firmware_ref:
@@ -240,7 +240,7 @@ jobs:
           else NOTE="$NOTE Mesa ANV missing (the runner stops after stage 6)."; fi
           cp gu605/scripts/* "$P/scripts/"; cp gu605/launchd/* "$P/launchd/"; chmod 755 "$P/scripts/"*.sh
           cp docs/GU605-*.md docs/IGPU-FEASIBILITY.md "$P/docs/"; cp LICENSE NOTICE "$P/"; cp -R licenses "$P/licenses"
-          { echo "branch gu605-mtl commit $(git rev-parse HEAD)"; echo "jobs: arm ${{ needs.arm.result }}, intel ${{ needs.intel.result }}"
+          { echo "branch ${{ github.ref_name }} commit $(git rev-parse HEAD)"; echo "jobs: arm ${{ needs.arm.result }}, intel ${{ needs.intel.result }}"
             echo "drm-kmod $DRM_KMOD_REV freebsd $FREEBSD_REV kcabi $KCABI_REV ogkm $OGKM_TAG vk $VK_TAG xnu $XNU_TAG"; echo "notes:$NOTE"
             cat art/arm-out/*.log 2>/dev/null | grep -E '^(XeGfxIntelFB|XgFbMove|XeMTLDriver|15 |XeGfxAGDC)' || true; } > "$P/BUILDINFO.txt"
           (cd "$P" && find . -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS)
@@ -258,5 +258,5 @@ jobs:
           set -euo pipefail
           SHA=${{ steps.pack.outputs.sha }}; T=gu605-$SHA
           gh release view "$T" >/dev/null 2>&1 && { echo "release $T exists"; exit 0; }
-          gh release create "$T" "out/pkg/$T.zip" --prerelease --target "$(git rev-parse HEAD)" --title "$T (GU605 test build)" \
-            --notes "Untested test build of branch gu605-mtl at $(git rev-parse HEAD). ${{ steps.pack.outputs.note }} Kurulum: docs/GU605-KURULUM.md, test: docs/GU605-TEST.md. SHA256SUMS inside the zip."
+          gh release create "$T" "out/pkg/$T.zip" --prerelease --target "$(git rev-parse HEAD)" --title "$T (GU605 test build, ${{ github.ref_name }})" \
+            --notes "Untested test build of branch ${{ github.ref_name }} at $(git rev-parse HEAD). ${{ steps.pack.outputs.note }} Kurulum: docs/GU605-KURULUM.md, test: docs/GU605-TEST.md. SHA256SUMS inside the zip."

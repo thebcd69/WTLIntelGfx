@@ -51,6 +51,9 @@ desktop), `FLIP`, `WSMARK`, `K5`, `EFI_LOG`.
 | boot-arg `-xegfxoff` | XeGfx tamamen boşta (aşama çalışamaz) |
 | boot-arg `-xeintelfboff` | Intel framebuffer'ı başlamaz |
 | boot-arg `-xgfbmoveoff`, `-xegfxnoflip`, `-xeintelfbnobl` | taşıma / flip / parlaklık kapalı |
+| boot-arg `-xegfxnokms` | i915 ekran yolu (DISPLAY=kms) bu açılışta kapalı, adopt yolu |
+| boot-arg `-xeintelfbnokms`, `-xeintelfbnoext` | framebuffer i915 köprüsünü / harici monitöre geçişi kullanmaz |
+| dosya `/Library/XeGfx/gu605/kms-failed` | KMS aşama 4 başarısız olduktan sonra kendiliğinden yazılır: sonraki açılışlar adopt; silmek yeniden dener |
 | dosya `/Library/XeGfx/gu605/autostart-off` | otomatik koşu kapalı (onaylanmayan bir koşudan sonra kendiliğinden yazılır) |
 | Safe Mode | koşucu hiçbir şey yapmaz |
 
