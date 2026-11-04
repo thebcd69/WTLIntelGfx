@@ -435,6 +435,7 @@ public:
                     else { fEdidLen = 0; XIFBLOG("EDID: AUX A read failed, the display stays unnamed"); }
                     uint32_t meas = xifbMeasureHz();
                     fHz16 = fEdidLen ? xifbSnapHz(fEdid, fEdidLen, meas) : meas;
+                    fStartHz16 = fHz16;   // the firmware's refresh: the boot mode's, also after i915 changed it
                     XIFBLOG("refresh measured %u.%02u Hz, reported %u.%02u Hz", meas >> 16, ((meas & 0xffff) * 100) >> 16,
                             fHz16 >> 16, ((fHz16 & 0xffff) * 100) >> 16);
                     gRegs = nullptr; fMmio = m; fR = (volatile uint32_t *)m->getVirtualAddress();
@@ -451,7 +452,8 @@ public:
         // samwu07's bootvram (console range, IOFBDependentID/Index, NVRMTiming): 7D55 only on this branch
         bool vram = fGu605 && OSDynamicCast(IOPCIDevice, provider) && xifbAddConsoleRange(provider);
         // IOFramebuffer::open looks for a child named "backlight" (AppleBacklightDisplay), so it is attached first
-        if (fGu605 && fBl.kind != XIFB_BL_NONE && (fBacklight = XeGfxIntelBacklight::with(&fBl))) {
+        // GU605: also without a DPCD backlight, as i915 (display path) may drive the panel's later
+        if (fGu605 && (fBacklight = XeGfxIntelBacklight::with(&fBl))) {
             fBacklight->setName("backlight");
             if (fBacklight->attach(this)) fBacklight->registerService(kIOServiceSynchronous);
             else { OSSafeReleaseNULL(fBacklight); XIFBLOG("gu605 backlight: handler attach failed"); }
@@ -492,6 +494,7 @@ public:
     volatile bool fVblEnabled = false, fVblStop = false; thread_call_t fVblCall = nullptr;
     uint32_t fVblCount = 0; uint64_t fVblLastAbs = 0, fVblPeriodAbs = 0, fVblPollAbs = 0, fVblEarlyAbs = 0;
     uint64_t fVblFired = 0, fVblSynthetic = 0; int fVblToken = 0;
+    uint64_t fWinAbs = 0, fSecAbs = 0; uint32_t fWinCount = 0;
     static void vblThunk(thread_call_param_t me, thread_call_param_t) { ((XeGfxIntelFramebuffer *)me)->vblTick(); }
     void vblTick() {
         if (fVblStop) return;
@@ -499,6 +502,23 @@ public:
         const uint32_t c = rd(0x70040);
         bool fire = false;
         if (c != fVblCount) { fVblCount = c; fVblLastAbs = now; fire = true; }
+        // the refresh can change under us (display path: 60 -> 240 Hz on the same raster): follow the frame counter
+        // over each second, or the poll below would wake once per old period and deliver a quarter of the refreshes
+        if (!fWinAbs) { fWinAbs = now; fWinCount = c; }
+        else if (now - fWinAbs >= fSecAbs) {
+            uint64_t ns = 0; absolutetime_to_nanoseconds(now - fWinAbs, &ns);
+            const uint32_t frames = c - fWinCount;
+            if (frames >= 20 && ns) {
+                const uint32_t hz16 = (uint32_t)(((uint64_t)frames << 16) * 1000000000ull / ns);
+                const uint32_t d = hz16 > fHz16 ? hz16 - fHz16 : fHz16 - hz16;
+                if (d > fHz16 / 25) {   // more than 4 %
+                    XIFBLOG("VBL: refresh now %u.%02u Hz (was %u.%02u)", hz16 >> 16, ((hz16 & 0xffff) * 100) >> 16, fHz16 >> 16,
+                            ((fHz16 & 0xffff) * 100) >> 16);
+                    fHz16 = hz16; fVblPeriodAbs = (now - fWinAbs) / frames;
+                }
+            }
+            fWinAbs = now; fWinCount = c;
+        }
         else if (now - fVblLastAbs > 2 * fVblPeriodAbs) { fVblLastAbs = now; fire = true; fVblSynthetic++; }
         if (fire && fVblEnabled && fVblProc) {
             fVblProc(fVblTarget, fVblRef);
@@ -511,6 +531,14 @@ public:
 public:
     IOReturn registerForInterruptType(IOSelect type, IOFBInterruptProc proc, OSObject *target, void *ref, void **iref) override {
         int off = 0;
+        // display path: the connect interrupt is ours to fire (new modes after the KMS takeover, hotplug)
+        if (fGu605 && type == kIOFBConnectInterruptType && !PE_parse_boot_argn("-xeintelfbnokms", &off, sizeof off)) {
+            if (fConnProc) return kIOReturnBusy;
+            fConnProc = proc; fConnTarget = target; fConnRef = ref; fConnEnabled = true;
+            if (iref) *iref = &fConnToken;
+            kmsWatchStart();
+            return kIOReturnSuccess;
+        }
         if (!fGu605 || type != kIOFBVBLInterruptType || !fR || !fHz16 || PE_parse_boot_argn("-xeintelfbnovbl", &off, sizeof off))
             return IONDRVFramebuffer::registerForInterruptType(type, proc, target, ref, iref);
         if (fVblProc) return kIOReturnBusy;
@@ -522,6 +550,7 @@ public:
         nanoseconds_to_absolutetime(periodNs, &fVblPeriodAbs);
         nanoseconds_to_absolutetime(250000, &fVblPollAbs);
         nanoseconds_to_absolutetime(1000000, &fVblEarlyAbs);
+        nanoseconds_to_absolutetime(1000000000ull, &fSecAbs); fWinAbs = 0;
         fVblProc = proc; fVblTarget = target; fVblRef = ref; fVblEnabled = true; fVblStop = false;
         fVblCount = rd(0x70040); fVblLastAbs = mach_absolute_time();
         thread_call_enter_delayed(fVblCall, fVblLastAbs + fVblPollAbs);
@@ -530,6 +559,7 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn unregisterInterrupt(void *iref) override {
+        if (iref == &fConnToken) { fConnEnabled = false; fConnProc = nullptr; fConnTarget = nullptr; fConnRef = nullptr; return kIOReturnSuccess; }
         if (iref != &fVblToken) return IONDRVFramebuffer::unregisterInterrupt(iref);
         fVblStop = true; fVblEnabled = false;   // a tick already running sees fVblStop first and does not re-arm
         if (fVblCall) thread_call_cancel(fVblCall);
@@ -538,11 +568,14 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn setInterruptState(void *iref, UInt32 state) override {
+        if (iref == &fConnToken) { fConnEnabled = state != kDisabledInterruptState; return kIOReturnSuccess; }
         if (iref != &fVblToken) return IONDRVFramebuffer::setInterruptState(iref, state);
         fVblEnabled = state != kDisabledInterruptState;
         return kIOReturnSuccess;
     }
     bool hasDDCConnect(IOIndex ci) override { return fEdidLen ? true : IONDRVFramebuffer::hasDDCConnect(ci); }
+#include "kms.inc"
+
     IOReturn getDDCBlock(IOIndex ci, UInt32 block, IOSelect type, IOOptionBits opt, UInt8 *data, IOByteCount *len) override {
         if (!fEdidLen) return IONDRVFramebuffer::getDDCBlock(ci, block, type, opt, data, len);
         if (!data || !len || block < 1 || (int)(block * 128) > fEdidLen) return kIOReturnUnsupported;
@@ -550,7 +583,7 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn getAppleSense(IOIndex ci, UInt32 *senseType, UInt32 *primary, UInt32 *extended, UInt32 *displayType) override {
-        if (!fBacklight || ci != 0) return IONDRVFramebuffer::getAppleSense(ci, senseType, primary, extended, displayType);
+        if (!fBacklight || ci != 0 || fExternal) return IONDRVFramebuffer::getAppleSense(ci, senseType, primary, extended, displayType);
         if (senseType) *senseType = 0;
         if (primary) *primary = 0;
         if (extended) *extended = 0;
@@ -558,15 +591,18 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn getAttributeForConnection(IOIndex ci, IOSelect attr, uintptr_t *value) override {
-        if (fGu605 && ci == 0 && attr == kConnectionFlags && value) { *value = kIOConnectionBuiltIn; return kIOReturnSuccess; }
+        if (fGu605 && ci == 0 && attr == kConnectionFlags && value) { *value = fExternal ? 0 : kIOConnectionBuiltIn; return kIOReturnSuccess; }
         if (fEdidLen && attr == kConnectionSupportsHLDDCSense) return kIOReturnSuccess;
         return IONDRVFramebuffer::getAttributeForConnection(ci, attr, value);
     }
     // the panel's size and refresh, and ValidForHiRes so the 2x sizes reach Displays settings (I-059 on NVRMFB)
     IOReturn getInformationForDisplayMode(IODisplayModeID mode, IODisplayModeInformation *info) override {
-        IOReturn r = IONDRVFramebuffer::getInformationForDisplayMode(mode, info);
+        const XifbKmsMode *km = kmsMode(mode);
+        IOReturn r = IONDRVFramebuffer::getInformationForDisplayMode(km || mode == fBootId ? fBootId : mode, info);
         if (r != kIOReturnSuccess || !info) return r;
-        if (fHz16) info->refreshRate = fHz16;
+        if (km) { kmsInfo(km, info); return r; }
+        if (fHz16 && !(fGu605 && fBootId && mode == fBootId && fBootHz16)) info->refreshRate = fHz16;
+        if (fGu605 && fBootId && mode == fBootId && fBootHz16) info->refreshRate = fBootHz16;
         if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }
         info->flags |= kDisplayModeValidForHiResFlag;
         return r;

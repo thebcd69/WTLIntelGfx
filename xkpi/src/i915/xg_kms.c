@@ -593,3 +593,27 @@ xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected,
 	drm_connector_put(connector);
 	return (n);
 }
+
+/* the connector's EDID as i915 last read it; returns its length (0 without one), -ENOENT without that connector */
+int
+xg_kms_edid(const char *name, unsigned char *buf, int len)
+{
+	struct drm_i915_private *i915 = xg_kms_i915();
+	struct drm_connector *connector;
+	struct drm_device *dev;
+	int n = 0;
+
+	if (i915 == NULL)
+		return (-ENODEV);
+	dev = &i915->drm;
+	if ((connector = xg_kms_connector(dev, name)) == NULL)
+		return (-ENOENT);
+	mutex_lock(&dev->mode_config.mutex);
+	if (connector->edid_blob_ptr != NULL) {
+		n = min_t(int, len, (int)connector->edid_blob_ptr->length);
+		memcpy(buf, connector->edid_blob_ptr->data, n);
+	}
+	mutex_unlock(&dev->mode_config.mutex);
+	drm_connector_put(connector);
+	return (n);
+}

@@ -91,6 +91,7 @@ int xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mh
 int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
 int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
 int xg_kms_client_init(void);
+int xg_kms_edid(const char *name, unsigned char *buf, int len);
 extern void (*xg_kms_notify)(void);
 extern unsigned int xg_kms_hotplugs;
 }
@@ -1087,6 +1088,8 @@ xg_kms_call(uintptr_t op, void *a, void *b, void *c)
 		char m[128];
 		if (a && v)
 			ret = xg_kms_set((const char *)a, v[0], v[1], v[2], (int)v[3], m, sizeof(m));
+		else
+			strlcpy(m, "bad arguments", sizeof(m));
 		if (a && v) {
 			if (c)
 				strlcpy((char *)c, m, 128);
@@ -1111,6 +1114,13 @@ xg_kms_call(uintptr_t op, void *a, void *b, void *c)
 		}
 		break;
 	}
+	case 5:		/* EDID: a = const char *name, b = uint8_t[1024], c = int *length out */
+		if (a && b && c) {
+			ret = xg_kms_edid((const char *)a, (unsigned char *)b, 1024);
+			*(int *)c = ret;
+			ret = ret < 0 ? ret : 0;
+		}
+		break;
 	case 4:		/* hotplug count: a = unsigned * */
 		if (a) {
 			*(unsigned *)a = xg_kms_hotplugs;

@@ -15,6 +15,7 @@ int xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mh
 int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
 int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
 int xg_kms_client_init(void);
+int xg_kms_edid(const char *name, unsigned char *buf, int len);
 extern void (*xg_kms_notify)(void);
 extern unsigned int xg_kms_hotplugs;
 
