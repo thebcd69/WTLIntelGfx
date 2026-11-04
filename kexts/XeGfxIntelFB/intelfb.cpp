@@ -439,7 +439,7 @@ public:
                             fHz16 >> 16, ((fHz16 & 0xffff) * 100) >> 16);
                     gRegs = nullptr; fMmio = m; fR = (volatile uint32_t *)m->getVirtualAddress();
                     // GU605: AUX A stays reachable for the DPCD backlight (serialised by gXifbAuxLock)
-                    if (fGu605) { if (!gXifbAuxLock) gXifbAuxLock = IOLockAlloc(); gRegs = fR; xifbBacklightProbe(&fBl); }
+                    if (fGu605) { if (!gXifbAuxLock) gXifbAuxLock = IOLockAlloc(); gRegs = fR; xifbBacklightProbe(&fBl, fEdid, fEdidLen); }
                 }
         }
         if (!curSetup()) fCurReady = false;
