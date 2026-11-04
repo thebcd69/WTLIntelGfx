@@ -16,6 +16,8 @@
 #include <IOKit/IOLocks.h>
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/graphics/IODisplay.h>
+#include <IOKit/i2c/IOI2CInterface.h>   // gu605-ddc (ddc.inc)
+#include <sys/errno.h>
 
 #define XIFBLOG(fmt, ...) IOLog("XeGfxIntelFB: " fmt "\n", ##__VA_ARGS__)
 
@@ -405,6 +407,7 @@ public:
             if (fBacklight->attach(this)) fBacklight->registerService(kIOServiceSynchronous);
             else { OSSafeReleaseNULL(fBacklight); XIFBLOG("gu605 backlight: handler attach failed"); }
         }
+        ddcPublish();   // gu605-ddc: before IOFramebuffer::open builds the I2C nubs
         bool ok = IONDRVFramebuffer::start(provider);
         if (!ok && fBacklight) { fBacklight->detach(this); OSSafeReleaseNULL(fBacklight); }
         // display path: watch for i915 taking the display over (also if IOFramebuffer never asks for connect interrupts)
@@ -524,6 +527,7 @@ public:
     }
     bool hasDDCConnect(IOIndex ci) override { return fEdidLen ? true : IONDRVFramebuffer::hasDDCConnect(ci); }
 #include "kms.inc"
+#include "ddc.inc"
 
     IOReturn getDDCBlock(IOIndex ci, UInt32 block, IOSelect type, IOOptionBits opt, UInt8 *data, IOByteCount *len) override {
         if (!fEdidLen) return IONDRVFramebuffer::getDDCBlock(ci, block, type, opt, data, len);

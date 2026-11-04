@@ -16,6 +16,18 @@ int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
 int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
 int xg_kms_client_init(void);
 int xg_kms_edid(const char *name, unsigned char *buf, int len);
+
+/* DDC/CI and EDID over the connector's own DDC bus (gu605-ddc, docs/GU605-DDC.md). One I2C transfer: an optional
+ * write of wlen bytes then an optional read of rlen bytes (a repeated start between them). Only 7-bit 0x37 (DDC/CI)
+ * may be written and read; 0x50 (EDID) only read, after at most a one-byte offset write. rdone gets the bytes read. */
+#define XG_KMS_I2C_WMAX 64
+#define XG_KMS_I2C_RMAX 256
+struct xg_kms_i2c {
+	unsigned int addr, wlen, rlen;
+	unsigned char *wbuf, *rbuf;
+	int rdone;
+};
+int xg_kms_i2c(const char *name, struct xg_kms_i2c *x);
 extern void (*xg_kms_notify)(void);
 extern unsigned int xg_kms_hotplugs;
 

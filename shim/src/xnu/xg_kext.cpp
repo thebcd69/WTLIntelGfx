@@ -92,6 +92,12 @@ int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
 int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
 int xg_kms_client_init(void);
 int xg_kms_edid(const char *name, unsigned char *buf, int len);
+struct xg_kms_i2c {
+	unsigned int addr, wlen, rlen;
+	unsigned char *wbuf, *rbuf;
+	int rdone;
+};
+int xg_kms_i2c(const char *name, struct xg_kms_i2c *x);
 extern void (*xg_kms_notify)(void);
 extern unsigned int xg_kms_hotplugs;
 }
@@ -1149,6 +1155,13 @@ xg_kms_call(uintptr_t op, void *a, void *b, void *c)
 			ret = xg_kms_edid((const char *)a, (unsigned char *)b, 1024);
 			*(int *)c = ret;
 			ret = ret < 0 ? ret : 0;
+		}
+		break;
+	case 6:		/* DDC (gu605-ddc): a = const char *name, b = struct xg_kms_i2c *, c = int *result (0 or -errno) */
+		if (a && b) {
+			ret = xg_kms_i2c((const char *)a, (struct xg_kms_i2c *)b);
+			if (c)
+				*(int *)c = ret;
 		}
 		break;
 	case 4:		/* hotplug count: a = unsigned * */

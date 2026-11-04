@@ -11,6 +11,8 @@
  *                       mode leaves the panel as it was
  *   xg_kms_backlight()  the eDP panel's brightness through intel_backlight (PWM or DPCD, whichever i915 chose)
  *   xg_kms_client_init() an in-kernel drm client whose hotplug callback counts and notifies the macOS side
+ *   xg_kms_i2c()        DDC/CI (0x37) and EDID (0x50) over an external connector's DDC bus: i915's DP AUX adapter
+ *                       (drm_dp_i2c_xfer, I2C-over-AUX) for DP and USB-C, GMBUS for HDMI (gu605-ddc)
  *
  * Written against the Linux DRM/i915 interfaces only; NullMoth's NVKMS bridge (PolyForm-Noncommercial) was a design
  * reference, none of its code is here.
@@ -18,6 +20,7 @@
 #include <linux/pci.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
+#include <linux/i2c.h>
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_uapi.h>
@@ -628,4 +631,59 @@ xg_kms_edid(const char *name, unsigned char *buf, int len)
 	mutex_unlock(&dev->mode_config.mutex);
 	drm_connector_put(connector);
 	return (n);
+}
+
+/*
+ * gu605-ddc: one I2C transfer on the named connector's DDC adapter (connector->ddc: &intel_dp->aux.ddc for DP and
+ * USB-C, the GMBUS pin's adapter for HDMI), so i915 does the AUX power, Type-C port lock, deferral retries and 16-byte
+ * AUX chunking itself, under the adapter's bus lock. Safety, enforced here whatever the caller asks: only 7-bit 0x37
+ * (DDC/CI) is written and read, 0x50 (EDID) only read after at most a one-byte offset; never the internal panel
+ * (eDP); bounded sizes (XG_KMS_I2C_WMAX / _RMAX); the connector must be connected. Returns 0 or -errno.
+ */
+int
+xg_kms_i2c(const char *name, struct xg_kms_i2c *x)
+{
+	struct drm_i915_private *i915 = xg_kms_i915();
+	struct drm_connector *connector;
+	struct i2c_msg msgs[2];
+	int n = 0, ret;
+
+	if (i915 == NULL)
+		return (-ENODEV);
+	if (x == NULL || (x->wlen == 0 && x->rlen == 0) || x->wlen > XG_KMS_I2C_WMAX || x->rlen > XG_KMS_I2C_RMAX ||
+	    (x->wlen != 0 && x->wbuf == NULL) || (x->rlen != 0 && x->rbuf == NULL))
+		return (-EINVAL);
+	if (x->addr != 0x37 && !(x->addr == 0x50 && x->wlen <= 1 && x->rlen != 0))
+		return (-EPERM);
+	x->rdone = 0;
+	if ((connector = xg_kms_connector(&i915->drm, name)) == NULL)
+		return (-ENOENT);
+	if (connector->connector_type == DRM_MODE_CONNECTOR_eDP || connector->connector_type == DRM_MODE_CONNECTOR_LVDS ||
+	    connector->status != connector_status_connected || connector->ddc == NULL) {
+		drm_connector_put(connector);
+		return (-ENODEV);
+	}
+	memset(msgs, 0, sizeof(msgs));
+	if (x->wlen != 0) {
+		msgs[n].addr = (uint16_t)x->addr;
+		msgs[n].flags = 0;
+		msgs[n].len = (uint16_t)x->wlen;
+		msgs[n].buf = x->wbuf;
+		n++;
+	}
+	if (x->rlen != 0) {
+		msgs[n].addr = (uint16_t)x->addr;
+		msgs[n].flags = I2C_M_RD;
+		msgs[n].len = (uint16_t)x->rlen;
+		msgs[n].buf = x->rbuf;
+		n++;
+	}
+	ret = i2c_transfer(connector->ddc, msgs, n);
+	drm_connector_put(connector);
+	if (ret < 0)
+		return (ret);
+	if (ret != n)
+		return (-EIO);
+	x->rdone = (int)x->rlen;
+	return (0);
 }
