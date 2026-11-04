@@ -13,9 +13,9 @@
 	<key>CFBundlePackageType</key>
 	<string>KEXT</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.9</string>
+	<string>0.9.4.1</string>
 	<key>CFBundleVersion</key>
-	<string>0.9</string>
+	<string>0.9.4.1</string>
 	<key>IOKitPersonalities</key>
 	<dict>
 		<key>XeGfxIntelFramebuffer</key>
@@ -29,7 +29,7 @@
 			<key>IONameMatch</key>
 			<string>display</string>
 			<key>IOPCIMatch</key>
-			<string>0x7d678086</string>
+			<string>0x7d678086 0x7d558086</string>
 			<key>IOProbeScore</key>
 			<integer>20001</integer>
 			<key>IOProviderClass</key>

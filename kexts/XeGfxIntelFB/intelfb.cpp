@@ -15,6 +15,7 @@
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOLocks.h>
 #include <IOKit/IOPlatformExpert.h>
+#include <IOKit/graphics/IODisplay.h>
 
 #define XIFBLOG(fmt, ...) IOLog("XeGfxIntelFB: " fmt "\n", ##__VA_ARGS__)
 
@@ -63,7 +64,7 @@ static void xifbGuardClear()
 // kmutil places a kext in a kernel collection only with a _kmod_info symbol (Xcode generates it; this build does not)
 #include <mach/kmod.h>
 extern "C" kern_return_t _start(kmod_info_t *ki, void *d); extern "C" kern_return_t _stop(kmod_info_t *ki, void *d);
-extern "C" { KMOD_EXPLICIT_DECL(org.watchthelight.XeGfxIntelFB, "0.9.4", _start, _stop) }
+extern "C" { KMOD_EXPLICIT_DECL(org.watchthelight.XeGfxIntelFB, "0.9.4.1", _start, _stop) }
 extern "C" kern_return_t _start(kmod_info_t *ki, void *d) { return KERN_SUCCESS; }
 extern "C" kern_return_t _stop(kmod_info_t *ki, void *d)  { return KERN_SUCCESS; }
 
@@ -210,6 +211,64 @@ static bool xifbAddConsoleRange(IOService *pci)
 }
 
 
+#include "gu605.h"
+// GU605: the brightness slider and keys through AppleBacklightDisplay. IODisplay calls doIntegerSet with the framebuffer
+// lock held, so the DPCD write runs from a thread call (as NullMoth's NMIntelBacklight does for the PWM).
+class XeGfxIntelBacklight : public IODisplayParameterHandler {
+    OSDeclareDefaultStructors(XeGfxIntelBacklight)
+    XifbBacklight *fBl = nullptr;
+    thread_call_t fApply = nullptr;
+    volatile SInt32 fPending = -1;
+    SInt32 fLevel = 100;
+    static void applyFire(thread_call_param_t p, thread_call_param_t) {
+        XeGfxIntelBacklight *me = (XeGfxIntelBacklight *)p;
+        SInt32 v;
+        do { v = me->fPending; } while (!OSCompareAndSwap((UInt32)v, (UInt32)-1, (volatile UInt32 *)&me->fPending));
+        if (v < 0) return;
+        if (xifbBacklightSet(me->fBl, (uint32_t)v)) me->fLevel = v;
+        else XIFBLOG("gu605 backlight: setting %d%% did not reach the panel", (int)v);
+    }
+public:
+    static XeGfxIntelBacklight *with(XifbBacklight *bl) {
+        XeGfxIntelBacklight *h = OSTypeAlloc(XeGfxIntelBacklight);
+        if (!h || !h->init()) { OSSafeReleaseNULL(h); return nullptr; }
+        h->fBl = bl; h->fLevel = bl->startPercent < 5 ? 5 : bl->startPercent;
+        h->fApply = thread_call_allocate(applyFire, h);
+        if (!h->fApply) { h->release(); return nullptr; }
+        return h;
+    }
+    bool setDisplay(IODisplay *display) override {
+        if (!display) return false;
+        OSObject *old = display->copyProperty(gIODisplayParametersKey);
+        OSDictionary *cur = OSDynamicCast(OSDictionary, old);
+        OSDictionary *params = cur ? OSDictionary::withDictionary(cur) : OSDictionary::withCapacity(2);
+        OSSafeReleaseNULL(old);
+        if (!params) return false;
+        IODisplay::addParameter(params, gIODisplayBrightnessKey, 0, 100);
+        IODisplay::setParameter(params, gIODisplayBrightnessKey, fLevel);
+        IODisplay::addParameter(params, gIODisplayLinearBrightnessKey, 0, 100);
+        IODisplay::setParameter(params, gIODisplayLinearBrightnessKey, fLevel);
+        display->setProperty(gIODisplayParametersKey, params);
+        params->release();
+        XIFBLOG("gu605 backlight: brightness parameters on %s at %d%%", display->getName(), (int)fLevel);
+        return true;
+    }
+    bool doIntegerSet(OSDictionary *, const OSSymbol *name, UInt32 value) override {
+        if (name != gIODisplayBrightnessKey && name != gIODisplayLinearBrightnessKey) return false;
+        fPending = value > 100 ? 100 : (SInt32)value;
+        thread_call_enter(fApply);
+        return true;
+    }
+    bool doDataSet(const OSSymbol *, OSData *) override { return false; }
+    bool doUpdate() override { return true; }
+    void free() override {
+        if (fApply) { thread_call_cancel(fApply); while (!thread_call_free(fApply)) { thread_call_cancel(fApply); IOSleep(1); } fApply = nullptr; }
+        IODisplayParameterHandler::free();
+    }
+};
+OSDefineMetaClassAndStructors(XeGfxIntelBacklight, IODisplayParameterHandler)
+
+
 // Hardware cursor on pipe A's cursor plane. Without one IOFramebuffer draws a software cursor, every move damages a
 // rect around it, and WindowServer recomposites blurred window backdrops there (the I-119 square).
 // The GOP maps a 16 MB GGTT block at 0xff000000 for its 16,384,000-byte framebuffer; the 96 pages after it lie in
@@ -229,6 +288,7 @@ static bool xifbAddConsoleRange(IOService *pci)
 class XeGfxIntelFramebuffer : public IONDRVFramebuffer {
     OSDeclareDefaultStructors(XeGfxIntelFramebuffer)
     uint8_t fEdid[256]; int fEdidLen = 0; uint32_t fHz16 = 0;
+    bool fGu605 = false; XifbBacklight fBl; XeGfxIntelBacklight *fBacklight = nullptr;   // GU605 (7D55) only
     IOMemoryMap *fMmio = nullptr; volatile uint32_t *fR = nullptr;
     IOBufferMemoryDescriptor *fCurMem = nullptr; IOMemoryMap *fCurMap = nullptr; uint32_t *fCurKva = nullptr;
     uint64_t fCurPte[XIFB_CUR_DIM * XIFB_CUR_DIM * 4 / 4096] = {};
@@ -335,9 +395,12 @@ public:
         int off = 0;
         if (PE_parse_boot_argn("-xeintelfboff", &off, sizeof off)) { XIFBLOG("off by boot-arg"); return nullptr; }
         if (xifbGuardTripped()) { XIFBLOG("boot guard tripped (two starts without WindowServer): declining"); return nullptr; }
+        // GU605: only when the iGPU drives the panel (Standard/Eco); in Ultimate the panel and console are NVIDIA's
+        if (xifbIsGu605(provider) && !xifbGu605OwnsPanel(provider)) return nullptr;
         return IONDRVFramebuffer::probe(provider, score);
     }
     bool start(IOService *provider) override {
+        fGu605 = xifbIsGu605(provider);
         xifbGuardCount();
         // System Profiler names the GPU from the PCI device's "model"; without it About This Mac shows a bare "Display"
         if (!provider->getProperty("model")) {
@@ -375,11 +438,21 @@ public:
                     XIFBLOG("refresh measured %u.%02u Hz, reported %u.%02u Hz", meas >> 16, ((meas & 0xffff) * 100) >> 16,
                             fHz16 >> 16, ((fHz16 & 0xffff) * 100) >> 16);
                     gRegs = nullptr; fMmio = m; fR = (volatile uint32_t *)m->getVirtualAddress();
+                    // GU605: AUX A stays reachable for the DPCD backlight (serialised by gXifbAuxLock)
+                    if (fGu605) { if (!gXifbAuxLock) gXifbAuxLock = IOLockAlloc(); gRegs = fR; xifbBacklightProbe(&fBl); }
                 }
         }
         if (!curSetup()) fCurReady = false;
-        bool vram = OSDynamicCast(IOPCIDevice, provider) && xifbAddConsoleRange(provider);
+        // samwu07's bootvram (console range, IOFBDependentID/Index, NVRMTiming): 7D55 only on this branch
+        bool vram = fGu605 && OSDynamicCast(IOPCIDevice, provider) && xifbAddConsoleRange(provider);
+        // IOFramebuffer::open looks for a child named "backlight" (AppleBacklightDisplay), so it is attached first
+        if (fGu605 && fBl.kind != XIFB_BL_NONE && (fBacklight = XeGfxIntelBacklight::with(&fBl))) {
+            fBacklight->setName("backlight");
+            if (fBacklight->attach(this)) fBacklight->registerService(kIOServiceSynchronous);
+            else { OSSafeReleaseNULL(fBacklight); XIFBLOG("gu605 backlight: handler attach failed"); }
+        }
         bool ok = IONDRVFramebuffer::start(provider);
+        if (!ok && fBacklight) { fBacklight->detach(this); OSSafeReleaseNULL(fBacklight); }
         // the name is still the class name here; it becomes ".Display_boot" when the boot NDRV opens it
         XIFBLOG("IONDRVFramebuffer start %s, name %s", ok ? "ok" : "FAILED", getName());
         // a GPU's own framebuffer driver names its GPU and its slot; IONDRVFramebuffer does not, and XeGfxAGDC left
@@ -433,7 +506,7 @@ public:
 public:
     IOReturn registerForInterruptType(IOSelect type, IOFBInterruptProc proc, OSObject *target, void *ref, void **iref) override {
         int off = 0;
-        if (type != kIOFBVBLInterruptType || !fR || !fHz16 || PE_parse_boot_argn("-xeintelfbnovbl", &off, sizeof off))
+        if (!fGu605 || type != kIOFBVBLInterruptType || !fR || !fHz16 || PE_parse_boot_argn("-xeintelfbnovbl", &off, sizeof off))
             return IONDRVFramebuffer::registerForInterruptType(type, proc, target, ref, iref);
         if (fVblProc) return kIOReturnBusy;
         // thread_call_allocate_with_priority and thread_call_cancel_wait are com.apple.kpi.private: a third-party kext
@@ -471,7 +544,16 @@ public:
         IOByteCount n = *len < 128 ? *len : 128; bcopy(fEdid + (block - 1) * 128, data, n); *len = n;
         return kIOReturnSuccess;
     }
+    IOReturn getAppleSense(IOIndex ci, UInt32 *senseType, UInt32 *primary, UInt32 *extended, UInt32 *displayType) override {
+        if (!fBacklight || ci != 0) return IONDRVFramebuffer::getAppleSense(ci, senseType, primary, extended, displayType);
+        if (senseType) *senseType = 0;
+        if (primary) *primary = 0;
+        if (extended) *extended = 0;
+        if (displayType) *displayType = kGenericLCD;   // AppleBacklightDisplay::probe takes an LCD connection only
+        return kIOReturnSuccess;
+    }
     IOReturn getAttributeForConnection(IOIndex ci, IOSelect attr, uintptr_t *value) override {
+        if (fGu605 && ci == 0 && attr == kConnectionFlags && value) { *value = kIOConnectionBuiltIn; return kIOReturnSuccess; }
         if (fEdidLen && attr == kConnectionSupportsHLDDCSense) return kIOReturnSuccess;
         return IONDRVFramebuffer::getAttributeForConnection(ci, attr, value);
     }
