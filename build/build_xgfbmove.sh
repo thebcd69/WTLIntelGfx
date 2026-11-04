@@ -11,7 +11,7 @@ SRC="$REPO/kexts/XgFbMove"
 rm -rf "$OUT/XgFbMove.kext"; mkdir -p "$OUT/XgFbMove.kext/Contents/MacOS"
 xcrun clang++ -arch x86_64 -mmacosx-version-min=15.0 -fapple-kext -mkernel -nostdinc -isysroot "$SDK" -I"$K" -I"$SRC" \
   -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT -std=c++17 -fno-rtti -fno-exceptions -fno-builtin -fno-common \
-  -O2 -Wall -Werror -Wno-unused-parameter -Wno-unused-function -g0 -c "$SRC/xgfbmove.cpp" -o "$OUT/xgfbmove.o"
+  -O2 -Wall -Werror -Wno-unused-parameter -Wno-unused-function -Wno-inconsistent-missing-override -Wno-deprecated-declarations -g0 -c "$SRC/xgfbmove.cpp" -o "$OUT/xgfbmove.o"
 xcrun clang++ -arch x86_64 -mmacosx-version-min=15.0 -fapple-kext -nostdlib -Xlinker -kext -lkmodc++ -lkmod -lcc_kext \
   "$OUT/xgfbmove.o" -o "$OUT/XgFbMove.kext/Contents/MacOS/XgFbMove"
 cp "$SRC/Info.plist" "$OUT/XgFbMove.kext/Contents/Info.plist"

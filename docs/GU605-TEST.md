@@ -15,14 +15,19 @@ Her açılışın özeti ayrıca `EFI/GU605/last-boot.txt`'e kendiliğinden yaz�
 2. Giriş yap. Bak: dahili panel 240 Hz, parlaklık tuşları/kaydırıcı çalışıyor (NullMoth), harici monitör sağ portta.
 3. `gu605-collect.sh` çalıştır. Beklenen: `mode: ultimate … nothing to do`.
 
-## Test 2 — Eco (asıl test, 1 açılış, ~10 dk)
+## Test 2 — Eco (asıl test, 1 açılış, ~10 dk) — seviye `metal` (varsayılan)
 1. Windows → G-Helper **Eco** → harici monitörü **SOL** USB-C'ye tak (açık kalsın) → yeniden başlat → macOS.
-2. Giriş ekranı gelince **giriş yapma, ~3-4 dk bekle.** Ekran bir kez kararıp giriş ekranı geri gelirse: masaüstü artık
-   Intel GPU'da (beklenen). Harici monitörün siyah kalması bu aşamada **normal** (Aşama 3).
-3. Giriş yap, 5 dk normal kullan: pencere sürükle, Safari'de bir sayfa, **parlaklık tuşları ve kaydırıcı**.
-4. `gu605-collect.sh` çalıştır.
-- Ekran 2 dk'dan uzun siyah/donuk kalırsa: güç tuşuna basılı tut → tekrar aç (otomatik koşu kendini kapatır, masaüstü
-  yavaş ama gelir) → giriş yap → `gu605-collect.sh`.
+2. Giriş ekranı gelince **~3 dk bekle**, sonra giriş yap. Bu seviyede masaüstü **yeniden başlamaz**: görüntü firmware
+   çerçeve tamponunda (XeGfxIntelFB) kalır; arka planda XeGfx aşama 1→7'yi koşar ve Metal'i yalnız bir test
+   sürecinde dener (WindowServer'a dokunmaz). Harici monitörün siyah kalması bu aşamada **normal**.
+3. 5 dk normal kullan: pencere sürükle, Safari'de bir sayfa, **parlaklık tuşları ve kaydırıcı**.
+4. `gu605-collect.sh` çalıştır. Beklenen özet (`EFI/GU605/last-boot.txt`): `stages to 7 passed`, `metal done`.
+- Ekran donarsa ya da beyaz **panik yazısı** çıkarsa (debug=0x100 kendiliğinden yeniden başlatmaz): güç tuşuna
+  basılı tut → aç. Sonraki açılışta otomatik koşu kendini kapatır (`autostart-off`), masaüstü yine gelir → giriş yap →
+  `gu605-collect.sh`.
+- Test boyunca **uyku yok**: kapağı kapatma, Uyku menüsünü kullanma (i915'in uyku/uyanma desteği yok; uyanışta
+  ekran gelmeyebilir).
+- Masaüstü adımı (WindowServer Intel GPU'da) sonraki test: `gu605.conf`'ta `ECO_LEVEL=desktop`.
 
 ## Test 3 — Standard (isteğe bağlı, 1 açılış, 2 dk)
 1. G-Helper **Standard** → macOS → giriş yap (masaüstü dahili panelde, hızlandırmasız olabilir).

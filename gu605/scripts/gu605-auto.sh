@@ -2,7 +2,7 @@
 # gu605-auto.sh: run by launchd at every boot (org.thebcd69.gu605.auto). Decides from what macOS sees which G-Helper
 # mode this is and does as much as gu605.conf allows, logging everything, never twice after a failure:
 #   ultimate (panel on NVIDIA): nothing but a short read-only note; the iGPU driver stays off, NullMoth keeps everything
-#   eco      (iGPU only):       ECO_LEVEL      (default desktop)
+#   eco      (iGPU only):       ECO_LEVEL      (default metal)
 #   standard (iGPU + NVIDIA):   STANDARD_LEVEL (default probe: read-only)
 # Levels: off | probe (stages 1-2, read-only) | gt (to 6: GuC, engines) | metal (to 7 + Metal test in a test process)
 #         | desktop (metal + WindowServer on the Intel GPU, at the login window only)
@@ -34,7 +34,7 @@ say "mode: $MODE (iGPU framebuffer $(igpu_fb_present), NVIDIA display device $(p
 } > "$R/boot-state.txt" 2>&1
 cat "$R/boot-state.txt" >> "$S"
 case "$MODE" in
-  eco) LEVEL=$(conf ECO_LEVEL desktop) ;;
+  eco) LEVEL=$(conf ECO_LEVEL metal) ;;
   standard) LEVEL=$(conf STANDARD_LEVEL probe) ;;
   *) finish "nothing to do in $MODE mode (the iGPU driver stays off)" ;;
 esac

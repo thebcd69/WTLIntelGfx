@@ -1,11 +1,12 @@
 # GU605 branch (ASUS ROG Zephyrus G16 GU605MY, Meteor Lake iGPU 8086:7D55, macOS 15 Sequoia): builds the kexts, the
 # Intel Metal plugin bundle and (on an Intel runner) XeGfx.kext and Mesa ANV, packs them with the GU605 scripts and
 # publishes a prerelease gu605-<shortsha>.
-#   arm   (macos-15, Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
+#   arm   (macos-14 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
 #         XeMTLDriver.bundle, mtlprobe, host tests. These kexts declare fixed KPIs; nothing reads the host's KC.
-#   intel (macos-15-intel): XeGfx.kext (its link step classifies every undefined symbol against the runner's own
+#   intel (macos-15-intel, only with vars.GU605_INTEL_JOB=1): XeGfx.kext (its link step classifies every undefined symbol against the runner's own
 #         x86_64 kernel collection, so it must run on Intel macOS) and the userland. Hosted Intel runners are scarce;
 #         when this job does not run, the package says so and leaves those parts out.
+#   userland-rosetta (same runner): Mesa ANV x86_64 under Rosetta, used when the Intel job gave none.
 #   pack  : one zip, SHA256SUMS, prerelease.
 name: gu605
 on:
@@ -31,12 +32,17 @@ env:
   XNU_TAG: xnu-11215.81.4                                   # macOS 15 xnu: config/*.exports for the arm job's link checks
 jobs:
   arm:
-    runs-on: macos-15
+    # macos-14 by default: during the November 2026 Actions incident macos-15 jobs were never picked up for this
+    # account while macos-14 ran. Repository variable GU605_ARM_RUNNER switches it back (e.g. macos-15).
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
         run: |
+          # the newest Xcode 16 on the image: macOS 15 SDK (the kexts target 15.0); macos-14 defaults to Xcode 15
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] && sudo xcode-select -s "$XC/Contents/Developer"
           sw_vers; uname -m; xcodebuild -version || true
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
           xcrun clang --version | head -1
@@ -133,6 +139,10 @@ jobs:
           if-no-files-found: ignore
 
   intel:
+    # opt-in (repository variable GU605_INTEL_JOB=1): hosted Intel runners were not available to this account in
+    # November 2026, and a job that is never picked up held the package back. Without it XeGfx.kext comes from the
+    # arm job (link checks against xnu's x86_64 export lists) and Mesa ANV from userland-rosetta.
+    if: vars.GU605_INTEL_JOB == '1'
     runs-on: macos-15-intel
     timeout-minutes: 180
     steps:
@@ -196,10 +206,43 @@ jobs:
             out/link/ld.txt
           if-no-files-found: ignore
 
+  # Mesa ANV for the x86_64 Mac without an Intel runner: the same script on an Apple-silicon runner under Rosetta
+  # (MacPorts x86_64 archives, every tool x86_64, the output checked with lipo). The pack step prefers the Intel job's.
+  userland-rosetta:
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rosetta and Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] && sudo xcode-select -s "$XC/Contents/Developer"
+          /usr/bin/pgrep -q oahd || sudo softwareupdate --install-rosetta --agree-to-license
+          arch -x86_64 /usr/bin/uname -m; xcodebuild -version
+      - name: Userland (Mesa ANV, libdrm, AIR bitcode reader), x86_64 under Rosetta
+        id: userland
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          arch -x86_64 /bin/bash gu605/ci/build_userland.sh "$PWD/out/userland" 2>&1 | tee out/userland.log
+          test "${PIPESTATUS[0]}" = 0
+      - uses: actions/upload-artifact@v4
+        if: steps.userland.outcome == 'success'
+        with:
+          name: userland-rosetta-out
+          path: out/userland
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: userland-rosetta-logs-${{ github.run_number }}
+          path: out/*.log
+          if-no-files-found: ignore
+
   pack:
-    needs: [arm, intel]
+    needs: [arm, intel, userland-rosetta]
     if: always() && needs.arm.result == 'success'
-    runs-on: macos-15
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -236,11 +279,12 @@ jobs:
               else NOTE="$NOTE XeGfx.kext missing (no kext in the upstream zip)."; fi
             else NOTE="$NOTE XeGfx.kext missing (Intel runner job: ${{ needs.intel.result }}, upstream zip unavailable or checksum mismatch)."; fi
           fi
-          if [ -f art/userland-out/libvulkan_intel.dylib ]; then ditto art/userland-out "$P/userland"
+          if [ -f art/userland-out/libvulkan_intel.dylib ]; then ditto art/userland-out "$P/userland"; NOTE="$NOTE Mesa ANV from the Intel runner."
+          elif [ -f art/userland-rosetta-out/libvulkan_intel.dylib ]; then ditto art/userland-rosetta-out "$P/userland"; NOTE="$NOTE Mesa ANV built x86_64 under Rosetta."
           else NOTE="$NOTE Mesa ANV missing (the runner stops after stage 6)."; fi
           cp gu605/scripts/* "$P/scripts/"; cp gu605/launchd/* "$P/launchd/"; chmod 755 "$P/scripts/"*.sh
           cp docs/GU605-*.md docs/IGPU-FEASIBILITY.md "$P/docs/"; cp LICENSE NOTICE "$P/"; cp -R licenses "$P/licenses"
-          { echo "branch ${{ github.ref_name }} commit $(git rev-parse HEAD)"; echo "jobs: arm ${{ needs.arm.result }}, intel ${{ needs.intel.result }}"
+          { echo "branch ${{ github.ref_name }} commit $(git rev-parse HEAD)"; echo "jobs: arm ${{ needs.arm.result }}, intel ${{ needs.intel.result }}, userland-rosetta ${{ needs.userland-rosetta.result }}"
             echo "drm-kmod $DRM_KMOD_REV freebsd $FREEBSD_REV kcabi $KCABI_REV ogkm $OGKM_TAG vk $VK_TAG xnu $XNU_TAG"; echo "notes:$NOTE"
             cat art/arm-out/*.log 2>/dev/null | grep -E '^(XeGfxIntelFB|XgFbMove|XeMTLDriver|15 |XeGfxAGDC)' || true; } > "$P/BUILDINFO.txt"
           (cd "$P" && find . -type f ! -name SHA256SUMS | sort | xargs shasum -a 256 > SHA256SUMS)

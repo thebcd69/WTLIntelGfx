@@ -4,7 +4,7 @@
 Downloads the i915 firmware files listed in the lock file from GitLab's linux-firmware at a fixed ref into DIR (flat,
 base names, as tools/link.sh expects), checks each SHA-256 against the lock, and writes DIR/FIRMWARE.txt (ref, commit,
 sizes, hashes, licence). Downloads are untrusted data: nothing is executed, sizes are bounded, names are fixed."""
-import argparse, hashlib, json, os, sys, urllib.parse, urllib.request
+import argparse, hashlib, json, os, sys, urllib.error, urllib.parse, urllib.request
 
 API = "https://gitlab.com/api/v4/projects/kernel-firmware%2Flinux-firmware"
 RAW = "https://gitlab.com/kernel-firmware/linux-firmware/-/raw/{ref}/{path}"
@@ -18,6 +18,34 @@ def get(url, limit=MAX):
     if len(data) > limit:
         sys.exit(f"STOP: {url} is larger than {limit} bytes")
     return data
+
+
+def fetch(ref, path):
+    """the file at path; a licence file that moved (404) is looked up by its base name in the tree"""
+    q = urllib.parse.quote(ref, safe="")
+    try:
+        return get(RAW.format(ref=q, path=path))
+    except urllib.error.HTTPError as e:
+        if e.code != 404 or not os.path.basename(path).startswith("LICEN"):
+            raise
+    base = os.path.basename(path)
+    for cand in ("LICENSES/" + base, "licenses/" + base, "i915/" + base):
+        try:
+            data = get(RAW.format(ref=q, path=cand))
+            print(f"::warning::{path} is at {cand} in {ref}")
+            return data
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+    for page in range(1, 80):
+        items = json.loads(get(API + f"/repository/tree?ref={q}&recursive=true&per_page=100&page={page}"))
+        if not items:
+            break
+        for it in items:
+            if it.get("type") == "blob" and os.path.basename(it["path"]) == base:
+                print(f"::warning::{path} is at {it['path']} in {ref}")
+                return get(RAW.format(ref=q, path=it["path"]))
+    sys.exit(f"STOP: {path} not found in linux-firmware {ref}")
 
 
 def main():
@@ -47,7 +75,7 @@ def main():
               "licence LICENSE.i915 (Intel: redistribution in binary form permitted, see the file)"]
     bad = 0
     for path, want in files:
-        data = get(RAW.format(ref=urllib.parse.quote(ref, safe=""), path=path))
+        data = fetch(ref, path)
         h = hashlib.sha256(data).hexdigest()
         name = os.path.basename(path)
         with open(os.path.join(a.out, name), "wb") as f:

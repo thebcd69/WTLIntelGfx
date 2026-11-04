@@ -39,7 +39,7 @@ NullMoth'un kext'leri kimlikleriyle korunur, eski koleksiyon yedeklenir), `/Libr
 `/Library/GPUBundles/xemtl/` (Mesa ANV, paket içeriyorsa), `/Library/XeGfx/gu605/` (betikler, `gu605.conf`, kayıtlar),
 `/Library/LaunchDaemons/org.thebcd69.gu605.auto.plist`. Her şeyin yedeği `/Library/XeGfx/gu605-backup-<tarih>/`.
 
-`/Library/XeGfx/gu605/gu605.conf`: `ECO_LEVEL=desktop`, `STANDARD_LEVEL=probe` (seviyeler: off, probe, gt, metal,
+`/Library/XeGfx/gu605/gu605.conf`: `ECO_LEVEL=metal` (ilk test; sonra `desktop`), `STANDARD_LEVEL=probe` (seviyeler: off, probe, gt, metal,
 desktop), `FLIP`, `WSMARK`, `K5`, `EFI_LOG`.
 
 ## 3. Acil durum anahtarları (OpenCore seçicide boot-arg eklemeden de çalışır)
