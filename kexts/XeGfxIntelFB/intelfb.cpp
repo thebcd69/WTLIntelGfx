@@ -212,61 +212,8 @@ static bool xifbAddConsoleRange(IOService *pci)
 
 
 #include "gu605.h"
-// GU605: the brightness slider and keys through AppleBacklightDisplay. IODisplay calls doIntegerSet with the framebuffer
-// lock held, so the DPCD write runs from a thread call (as NullMoth's NMIntelBacklight does for the PWM).
-class XeGfxIntelBacklight : public IODisplayParameterHandler {
-    OSDeclareDefaultStructors(XeGfxIntelBacklight)
-    XifbBacklight *fBl = nullptr;
-    thread_call_t fApply = nullptr;
-    volatile SInt32 fPending = -1;
-    SInt32 fLevel = 100;
-    static void applyFire(thread_call_param_t p, thread_call_param_t) {
-        XeGfxIntelBacklight *me = (XeGfxIntelBacklight *)p;
-        SInt32 v;
-        do { v = me->fPending; } while (!OSCompareAndSwap((UInt32)v, (UInt32)-1, (volatile UInt32 *)&me->fPending));
-        if (v < 0) return;
-        if (xifbBacklightSet(me->fBl, (uint32_t)v)) me->fLevel = v;
-        else XIFBLOG("gu605 backlight: setting %d%% did not reach the panel", (int)v);
-    }
-public:
-    static XeGfxIntelBacklight *with(XifbBacklight *bl) {
-        XeGfxIntelBacklight *h = OSTypeAlloc(XeGfxIntelBacklight);
-        if (!h || !h->init()) { OSSafeReleaseNULL(h); return nullptr; }
-        h->fBl = bl; h->fLevel = bl->startPercent < 5 ? 5 : bl->startPercent;
-        h->fApply = thread_call_allocate(applyFire, h);
-        if (!h->fApply) { h->release(); return nullptr; }
-        return h;
-    }
-    bool setDisplay(IODisplay *display) override {
-        if (!display) return false;
-        OSObject *old = display->copyProperty(gIODisplayParametersKey);
-        OSDictionary *cur = OSDynamicCast(OSDictionary, old);
-        OSDictionary *params = cur ? OSDictionary::withDictionary(cur) : OSDictionary::withCapacity(2);
-        OSSafeReleaseNULL(old);
-        if (!params) return false;
-        IODisplay::addParameter(params, gIODisplayBrightnessKey, 0, 100);
-        IODisplay::setParameter(params, gIODisplayBrightnessKey, fLevel);
-        IODisplay::addParameter(params, gIODisplayLinearBrightnessKey, 0, 100);
-        IODisplay::setParameter(params, gIODisplayLinearBrightnessKey, fLevel);
-        display->setProperty(gIODisplayParametersKey, params);
-        params->release();
-        XIFBLOG("gu605 backlight: brightness parameters on %s at %d%%", display->getName(), (int)fLevel);
-        return true;
-    }
-    bool doIntegerSet(OSDictionary *, const OSSymbol *name, UInt32 value) override {
-        if (name != gIODisplayBrightnessKey && name != gIODisplayLinearBrightnessKey) return false;
-        fPending = value > 100 ? 100 : (SInt32)value;
-        thread_call_enter(fApply);
-        return true;
-    }
-    bool doDataSet(const OSSymbol *, OSData *) override { return false; }
-    bool doUpdate() override { return true; }
-    void free() override {
-        if (fApply) { thread_call_cancel(fApply); while (!thread_call_free(fApply)) { thread_call_cancel(fApply); IOSleep(1); } fApply = nullptr; }
-        IODisplayParameterHandler::free();
-    }
-};
-OSDefineMetaClassAndStructors(XeGfxIntelBacklight, IODisplayParameterHandler)
+// GU605: the brightness slider and keys through AppleBacklightDisplay (adapted from NullMoth, PolyForm-NC)
+#include "nm_backlight.h"
 
 
 // Hardware cursor on pipe A's cursor plane. Without one IOFramebuffer draws a software cursor, every move damages a
