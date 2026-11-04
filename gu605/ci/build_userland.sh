@@ -67,7 +67,14 @@ cmake -S "$S" -B "$S/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_
 ninja -C "$S/build" -j "$JOBS" >> "$BLOG" 2>&1; cmake --install "$S/build" >> "$BLOG" 2>&1
 # libdrm (core only; libdrm_intel needs libpciaccess, BUILD.md)
 export PKG_CONFIG_LIBDIR=$X/prefix/lib/pkgconfig
-meson setup "$X/drm/build" "$X/drm" --prefix="$X/prefix" --libdir=lib -Dbuildtype=release \
+# meson sees through Rosetta and would build for aarch64 (Mesa's blake3 NEON code broke run 41894886487): name the
+# machine. A native file's [build_machine] overrides the detection; every meson setup below gets it.
+MF=()
+if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+  printf "[build_machine]\nsystem = 'darwin'\ncpu_family = 'x86_64'\ncpu = 'x86_64'\nendian = 'little'\n" > "$X/x86_64-machine.ini"
+  MF=(--native-file "$X/x86_64-machine.ini")
+fi
+meson setup ${MF[@]+"${MF[@]}"} "$X/drm/build" "$X/drm" --prefix="$X/prefix" --libdir=lib -Dbuildtype=release \
   -Dc_args=-mmacosx-version-min=11.0 -Dc_link_args=-mmacosx-version-min=11.0 \
   -Dintel=disabled -Damdgpu=disabled -Dradeon=disabled -Dnouveau=disabled -Dvmwgfx=disabled -Domap=disabled \
   -Dexynos=disabled -Dtegra=disabled -Dvc4=disabled -Detnaviv=disabled \
@@ -76,7 +83,7 @@ ninja -C "$X/drm/build" >> "$BLOG" 2>&1; meson install -C "$X/drm/build" >> "$BL
 # host mesa_clc + vtn_bindgen2
 LLVM_LIB=$("$LLVM_CONFIG" --libdir)
 printf "[binaries]\nllvm-config = '%s'\ncmake = 'false'\n" "$LLVM_CONFIG" > "$X/native-llvm.ini"
-PKG_CONFIG_LIBDIR= PKG_CONFIG_PATH=$X/spirv-llvm/lib/pkgconfig:$MP/lib/pkgconfig meson setup "$X/mesa/build-host" "$X/mesa" \
+PKG_CONFIG_LIBDIR= PKG_CONFIG_PATH=$X/spirv-llvm/lib/pkgconfig:$MP/lib/pkgconfig meson setup ${MF[@]+"${MF[@]}"} "$X/mesa/build-host" "$X/mesa" \
   --native-file "$X/native-llvm.ini" --prefix="$X/host" -Dbuildtype=release \
   -Dmesa-clc=enabled -Dinstall-mesa-clc=true -Dllvm=enabled -Dshared-llvm=enabled \
   -Dc_link_args=-Wl,-rpath,$LLVM_LIB -Dcpp_link_args=-Wl,-rpath,$LLVM_LIB \
@@ -88,7 +95,7 @@ ninja -C "$X/mesa/build-host" >> "$BLOG" 2>&1; meson install -C "$X/mesa/build-h
 # target ANV, no LLVM; expat from the SDK (BUILD.md)
 mkdir -p "$X/sdk-pc"; printf 'Name: expat\nVersion: 2.7.1\nDescription: SDK expat\nLibs: -lexpat\nCflags:\n' > "$X/sdk-pc/expat.pc"
 printf "[binaries]\ncmake = 'false'\nllvm-config = 'false'\n" > "$X/native-target.ini"
-PATH=$X/host/bin:$PATH PKG_CONFIG_LIBDIR=$X/prefix/lib/pkgconfig:$X/sdk-pc meson setup "$X/mesa/build" "$X/mesa" \
+PATH=$X/host/bin:$PATH PKG_CONFIG_LIBDIR=$X/prefix/lib/pkgconfig:$X/sdk-pc meson setup ${MF[@]+"${MF[@]}"} "$X/mesa/build" "$X/mesa" \
   --native-file "$X/native-target.ini" --prefix="$X/prefix" --libdir=lib -Dbuildtype=release -Db_ndebug=true \
   -Dc_args=-mmacosx-version-min=14.4 -Dcpp_args=-mmacosx-version-min=14.4 -Dobjc_args=-mmacosx-version-min=14.4 \
   -Dc_link_args=-mmacosx-version-min=14.4 -Dcpp_link_args=-mmacosx-version-min=14.4 \
