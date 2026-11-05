@@ -57,6 +57,8 @@ sysctl -w debug.nvaccel_iop=1 > /dev/null || die "debug.nvaccel_iop=1 failed"
   ioreg -l -w0 -r -c NMXAccel; ioreg -l -w0 -r -c XeGfxIntelFramebuffer; } > "$R/state-before-restart.txt" 2>&1
 klog 10m > "$R/kernel-10m.txt"; sync
 
+# [gu605-mac] kern.boottime reads "{ sec = N, usec = M } date": the old sed's greedy .*sec matched "usec" and took M as
+# the boot time, so every login looked 56 years after boot and an automatic login was never recognised (2026-11-05 13:03).
 # When to restart WindowServer (the screen goes dark once and the session ends):
 #   nobody logged in (login window)            -> now
 #   FORCE=1                                    -> now
@@ -79,8 +81,11 @@ case "$cu" in ""|root|_*) ;; *)
       skip) die "$cu is logged in and DESKTOP_LOGGED_IN=skip" ;;
       logout) MODE=logout ;;
       *) MODE=logout
-         dock=$(pgrep -u "$cu" -x Dock | head -1); up=$(( $(date +%s) - $(sysctl -n kern.boottime | sed -E 's/.*sec = ([0-9]+).*/\1/') ))
+         dock=$(pgrep -u "$cu" -x Dock | head -1); up=$(( $(date +%s) - $(sysctl -n kern.boottime | sed -E 's/^[{] sec = ([0-9]+),.*/\1/') ))
          age=$([ -n "$dock" ] && etime_s "$dock" || echo "$up"); login_at=$(( up - ${age:-$up} )); idle=$(idle_s)
+         # a clock step after the Dock started (Windows leaves local time in the RTC; NTP moves it by hours) makes the Dock
+         # look older than the boot: count that session as started at boot
+         [ "$login_at" -ge 0 ] || login_at=0
          say "$cu logged in ${login_at}s after boot, session ${age}s old, idle ${idle:-?}s"
          if [ "$login_at" -le "$(conf DESKTOP_AUTOLOGIN_S 150)" ] && [ "${idle:-0}" -ge "$(conf DESKTOP_IDLE_S 60)" ]; then
            notify "$cu" "20 sn sonra ekran bir kez kararacak ve oturum kapanacak (masaüstü Intel GPU'ya geçiyor). Klavye/izleme dörtgenine dokunursan iptal olur ve çıkış yaptığında olur."
