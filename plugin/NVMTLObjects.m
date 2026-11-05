@@ -84,6 +84,25 @@ static _Atomic uint64_t gRes2Tick;
 static void nvmtl_res2_note_use(NVMTLTexture *t);
 static uint64_t nvmtl_res2_evict(uint64_t want);
 extern uint64_t (*nvmtl_res2_evict_hook)(uint64_t want);
+// GU605 vibrancy preset: NVMTL_XE_VIBRANCY=1 (nvrm610.conf or the environment) is the best guess in one line; any of its
+// knobs set on its own wins. Records what it set in the NVMTL_CONF_SET list when one is given.
+static void nvmtl_xe_vibrancy_preset(char *recbuf, size_t cap, size_t *recn, unsigned *took)
+{
+    const char *v = getenv("NVMTL_XE_VIBRANCY");
+    if (!v || v[0] != '1') return;
+    static const char *const preset[][2] = { { "NVMTL_XE_SELF_SAMPLE", "barrier" }, { "NVMTL_XE_SAMPLE_GENERAL", "1" },
+                                             { "NVMTL_XE_SELF_SURF", "1" }, { "NVMTL_XE_TILED_PAD", "1" } };
+    for (unsigned i = 0; i < sizeof preset / sizeof preset[0]; i++)
+        if (!getenv(preset[i][0]) && setenv(preset[i][0], preset[i][1], 0) == 0) {
+            if (recbuf && recn) {
+                int k = snprintf(recbuf + *recn, cap - *recn, "%s%s=%s", *recn ? ";" : "", preset[i][0], preset[i][1]);
+                if (k > 0 && (size_t)k < cap - *recn) *recn += (size_t)k; else recbuf[*recn] = 0;
+            }
+            if (took) (*took)++;
+        }
+    nvlog("conf: NVMTL_XE_VIBRANCY=1 preset: self-sample %s, sample layout GENERAL %s, surface match %s, tiled pad %s", getenv("NVMTL_XE_SELF_SAMPLE"),
+          getenv("NVMTL_XE_SAMPLE_GENERAL"), getenv("NVMTL_XE_SELF_SURF"), getenv("NVMTL_XE_TILED_PAD"));
+}
 __attribute__((constructor)) static void nvmtl_conf_knobs(void)
 {
 #if NVMTL_RELEASE
@@ -106,7 +125,7 @@ __attribute__((constructor)) static void nvmtl_conf_knobs(void)
       unsetenv("NVMTL_CONF_SET"); }
     char recbuf[2048]; size_t recn = 0; recbuf[0] = 0;
     FILE *f = fopen("/Library/GPUBundles/nvmtl/nvrm610.conf", "r");
-    if (!f) { if (forgot) nvlog("conf: forgot %u inherited knob(s); no conf file", forgot); return; }
+    if (!f) { if (forgot) nvlog("conf: forgot %u inherited knob(s); no conf file", forgot); nvmtl_xe_vibrancy_preset(NULL, 0, NULL, NULL); return; }
     char line[512];
     unsigned took = 0;
     while (fgets(line, sizeof line, f)) {
@@ -128,6 +147,7 @@ __attribute__((constructor)) static void nvmtl_conf_knobs(void)
             if (k > 0 && (size_t)k < sizeof recbuf - recn) recn += (size_t)k; else recbuf[recn] = 0; }
     }
     fclose(f);
+    nvmtl_xe_vibrancy_preset(recbuf, sizeof recbuf, &recn, &took);
     if (recn) setenv("NVMTL_CONF_SET", recbuf, 1);
     if (took || forgot) nvlog("conf: %u knob(s) read from /Library/GPUBundles/nvmtl/nvrm610.conf, %u inherited conf knob(s) forgotten first (the environment still wins)", took, forgot);
 }
@@ -807,6 +827,28 @@ static NVMTLTexture *nvmtl_texbuf_make(NVMTLBuffer *b, MTLTextureDescriptor *d, 
                   (unsigned long)d.arrayLength, (unsigned long)d.depth, (unsigned long)d.storageMode, (unsigned long)_storage,
                   v ? "view of a stand-in resynced at every submission" : "stand-in view also REFUSED, copied texture"); }
             if (v) return v;
+        }
+        // GU605 (NVMTL_XE_TILED_PAD=1): a pitch the linear texture header cannot take (WindowServer's 44x16 at 176 B)
+        // gets a stand-in with the pitch rounded up to 64 B, refilled row by row at every submission, instead of the
+        // one-time copy below that goes stale when the caller rewrites its bytes
+        static int pad = -1; if (pad < 0) { const char *e = getenv("NVMTL_XE_TILED_PAD"); pad = e && e[0] == '1'; }
+        const size_t pp = ((size_t)bpr + 63) & ~(size_t)63;
+        if (pad && pp != bpr && offset + (size_t)bpr * (d.height - 1) + MIN((size_t)bpr, (size_t)d.width * 16) <= _b.size) {
+            NVMTLBuffer *s2 = [NVMTLBuffer new];
+            const size_t rowb = MIN((size_t)bpr, _b.size - offset);
+            if (s2 && !nvmtl_vk_buffer_create(pp * d.height, 1, &s2->_b) && s2->_b.map) {
+                s2->_storage = MTLStorageModeShared;
+                s2->_hostPtr = (char *)base + offset; s2->_hostLen = (size_t)bpr * d.height;
+                s2->_hostSrcPitch = bpr; s2->_hostDstPitch = pp; s2->_hostRowBytes = rowb; s2->_hostRows = (uint32_t)d.height;
+                nvmtl_buffer_sync_in(s2);
+                NVMTLBuffer *src = self;
+                s2->_hostDealloc = ^(void *p, NSUInteger l) { (void)p; (void)l; (void)src; };
+                MTLTextureDescriptor *sd = [d copy]; sd.mipmapLevelCount = 1; sd.sampleCount = 1; sd.arrayLength = 1; sd.depth = 1;
+                id<MTLTexture> v = [s2 newTextureWithDescriptor:sd offset:0 bytesPerRow:pp];
+                { static int said; if (said++ < 4) nvlog("newTiledTextureWithDescriptor: %lux%lu bpr %lu -> padded stand-in (pitch %zu) resynced at every submission: %s",
+                      (unsigned long)d.width, (unsigned long)d.height, (unsigned long)bpr, pp, v ? "ok" : "REFUSED too"); }
+                if (v) return v;
+            }
         }
     }
     MTLTextureDescriptor *cd = [d copy]; cd.storageMode = MTLStorageModeShared;
@@ -3226,6 +3268,15 @@ static NVMTLBuffer *nvmtl_bytes_ring(NVMTLCommandBuffer *cb, NSUInteger len, siz
     nvmtl_surface_in_for_cb(_cb, nt);
     // the pass samples its own target: read the copy taken before the pass (nvmtl_self_snap), else put a barrier before
     // its draws (nvmtl_self_tex_barrier); xe-live bit 256 turns both off
+    // barrier mode also counts a second wrapper of the attachment's IOSurface (WindowServer re-wraps its surfaces
+    // every frame: newTextureWithDescriptor:iosurface: 2560x1404 x8192), which the object compare misses
+    { static int bySurf = -1; if (bySurf < 0) { const char *e = getenv("NVMTL_XE_SELF_SURF"); bySurf = e && *e ? e[0] == '1' : nvmtl_vk_self_sample_mode() == 2; }
+      NVMTLTexture *rt = _target ? (_target->_parent ?: _target) : nil, *rs = nt->_parent ?: nt;
+      if (bySurf && rt && rs != rt && rt->_surf && rs->_surf && IOSurfaceGetID(rt->_surf) == IOSurfaceGetID(rs->_surf) && !(nvmtl_xe_live_mask_r(1) & 256)) {
+          _cb->_c.self_tex = 1;
+          static int said; if (said++ < 4) nvlog("self-sampled target by IOSurface %u (%ux%u): another wrapper of the attachment's surface - barrier before the read",
+                                                 (unsigned)IOSurfaceGetID(rt->_surf), [rt nvi]->w, [rt nvi]->h);
+      } }
     if (_target && (nt->_parent ?: nt) == (_target->_parent ?: _target) && !(nvmtl_xe_live_mask_r(1) & 256)) {
         const int mode = nvmtl_vk_self_sample_mode();
         if (mode == 2) {
@@ -5987,6 +6038,11 @@ uint32_t nvmtl_geoms_from_descriptor(id desc, nvmtl_geom *out, uint32_t max, int
 
 static void nvmtl_buffer_sync_in(NVMTLBuffer *b)
 {
+    if (b && b->_hostRows && b->_hostPtr && b->_b.map) {   // padded stand-in (NVMTL_XE_TILED_PAD): row by row
+        for (uint32_t y = 0; y < b->_hostRows; y++)
+            memcpy((char *)b->_b.map + (size_t)y * b->_hostDstPitch, (const char *)b->_hostPtr + (size_t)y * b->_hostSrcPitch, b->_hostRowBytes);
+        return;
+    }
     if (!b || !b->_hostPtr || !b->_b.map || !b->_hostLen) return;
     const uint64_t t0 = nvmtl_perf_now();
     memcpy(b->_b.map, b->_hostPtr, b->_hostLen);
@@ -6000,7 +6056,7 @@ static void nvmtl_buffer_sync_out(NVMTLBuffer *b)
             if (nvmtl_vk_copy_buffer(nvmtl_device_queue(), &b->_b, 0, &b->_shadow, 0, b->_b.size)) nvlog("commit: managed sync-out of %zu bytes FAILED", b->_b.size); }
         return;
     }
-    if (!b || !b->_hostPtr || !b->_b.map || !b->_hostLen) return;
+    if (!b || !b->_hostPtr || !b->_b.map || !b->_hostLen || b->_hostRows) return;   // a padded stand-in is read-only
     const uint64_t t0 = nvmtl_perf_now();
     memcpy(b->_hostPtr, b->_b.map, b->_hostLen);
     nvmtl_perf_note(NVP_SYNCOUT, t0, b->_hostLen);

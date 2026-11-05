@@ -15,6 +15,10 @@
 //   ws.selfsample      what WindowServer does for a backdrop: an IOSurface target, one command buffer; pass 1 draws
 //                      picture A, pass 2 (Load, and again with Clear) draws picture B, a render-target memory barrier,
 //                      then a draw that samples the target itself (another region) -- it must see B, not A (x20)
+//   ws.backdrop        the backdrop chain: IOSurface target with A then B drawn in one command buffer, B copied down
+//                      into a 4-level texture, each level rendered from the one above it (Load and Clear variants:
+//                      the same texture, another level), then level 3 saturated x2 back over the target: must be
+//                      B blurred and saturated, not A, not black (x10 each)
 // Exit 0 when every test passed. Build (Command Line Tools only):
 //   clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal \
 //     -framework QuartzCore -framework CoreImage -framework MetalPerformanceShaders -framework ImageIO \
@@ -160,6 +164,11 @@ static NSString *const kShaders =
      "fragment float4 offbox(V v [[stage_in]], texture2d<float> t [[texture(0)]], constant float2 &o [[buffer(0)]]) {\n"
      "  constexpr sampler s(filter::nearest, address::clamp_to_edge); float dx = 1.0 / t.get_width(); float4 a = 0;\n"
      "  for (int k = -4; k <= 4; k++) a += t.sample(s, v.uv + o + float2(k * dx, 0)); return a / 9; }\n"
+     "fragment float4 lodlin(V v [[stage_in]], texture2d<float> t [[texture(0)]], constant float &l [[buffer(0)]]) {\n"
+     "  constexpr sampler s(filter::linear, mip_filter::nearest, address::clamp_to_edge); return t.sample(s, v.uv, level(l)); }\n"
+     "fragment float4 satlod(V v [[stage_in]], texture2d<float> t [[texture(0)]], constant float &l [[buffer(0)]]) {\n"
+     "  constexpr sampler s(filter::nearest, mip_filter::nearest); float4 c = t.sample(s, v.uv, level(l));\n"
+     "  float y = dot(c.rgb, float3(0.2126, 0.7152, 0.0722)); return float4(clamp(y + (c.rgb - y) * 2.0, 0.0, 1.0), 1.0); }\n"
      "kernel void hblur(texture2d<float, access::read> src [[texture(0)]], texture2d<float, access::write> dst [[texture(1)]],\n"
      "                  uint2 g [[thread_position_in_grid]], uint2 l [[thread_position_in_threadgroup]], uint2 tg [[threadgroup_position_in_grid]]) {\n"
      "  threadgroup float4 tile[64 + 16]; int x0 = int(tg.x) * 64 - 8; int w = int(src.get_width());\n"
@@ -411,7 +420,7 @@ static void t_selfsample_one(BOOL loadPass, int *okN, int *aN, int *otherN, doub
 {
     id<MTLRenderPipelineState> cp = pso(@"copy"), op = pso(@"offbox");
     if (!cp || !op) { (*otherN) += frames; return; }
-    NSDictionary *props = @{ (id)kIOSurfaceWidth: @W, (id)kIOSurfaceHeight: @H, (id)kIOSurfaceBytesPerElement: @4,
+    NSDictionary *props = @{ (id)kIOSurfaceWidth: @(W), (id)kIOSurfaceHeight: @(H), (id)kIOSurfaceBytesPerElement: @4,
                              (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA') };
     IOSurfaceRef surf = IOSurfaceCreate((__bridge CFDictionaryRef)props);
     MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:W height:H mipmapped:NO];
@@ -474,6 +483,86 @@ static void t_selfsample(void)
     }
 }
 
+static void cpu_backdrop(const uint8_t *src, uint8_t *out)   // 16x16 box (four 2x2 halvings), then saturation x2
+{
+    for (int by = 0; by < H / 16; by++)
+        for (int bx = 0; bx < W / 16; bx++) {
+            double c[3] = { 0, 0, 0 };
+            for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++)
+                for (int k = 0; k < 3; k++) c[k] += src[((size_t)(by * 16 + y) * W + bx * 16 + x) * 4 + k] / 255.0;
+            for (int k = 0; k < 3; k++) c[k] /= 256;
+            const double yl = 0.2126 * c[2] + 0.7152 * c[1] + 0.0722 * c[0];
+            uint8_t o[4]; for (int k = 0; k < 3; k++) { double v = yl + (c[k] - yl) * 2; v = v < 0 ? 0 : v > 1 ? 1 : v; o[k] = (uint8_t)(v * 255 + 0.5); } o[3] = 255;
+            for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++) memcpy(out + ((size_t)(by * 16 + y) * W + bx * 16 + x) * 4, o, 4);
+        }
+}
+static void t_backdrop(void)
+{
+    id<MTLRenderPipelineState> cp = pso(@"copy"), dp = pso(@"down2"), sp = pso(@"satlod"), lp = pso(@"lodlin");
+    if (!cp || !dp || !sp || !lp) { result("ws.backdrop", 0, @"pipeline"); return; }
+    NSDictionary *props = @{ (id)kIOSurfaceWidth: @(W), (id)kIOSurfaceHeight: @(H), (id)kIOSurfaceBytesPerElement: @4,
+                             (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA') };
+    IOSurfaceRef surf = IOSurfaceCreate((__bridge CFDictionaryRef)props);
+    MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:W height:H mipmapped:NO];
+    d.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead; d.storageMode = MTLStorageModeManaged;
+    id<MTLTexture> t = surf ? [gDev newTextureWithDescriptor:d iosurface:surf plane:0] : nil;
+    id<MTLTexture> m = tex(W / 2, H / 2, 4, MTLStorageModePrivate, MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead);
+    if (!t || !m) { result("ws.backdrop", 0, @"IOSurface / mip texture"); if (surf) CFRelease(surf); return; }
+    uint8_t *a = malloc(W * H * 4), *b = malloc(W * H * 4), *ea = malloc(W * H * 4), *eb = malloc(W * H * 4), *got = malloc(W * H * 4);
+    for (int variant = 0; variant < 2; variant++) {
+        const MTLLoadAction mipLoad = variant ? MTLLoadActionClear : MTLLoadActionLoad;
+        int ok = 0, olda = 0, black = 0, other = 0; double worst = 0;
+        for (int f = 0; f < 10; f++) {
+            pattern(a, 2 + f); pattern(b, 5 + 3 * f);
+            for (size_t i = 0; i < (size_t)W * H * 4; i += 4) { uint8_t q = b[i]; b[i] = b[i + 1]; b[i + 1] = q; }
+            id<MTLTexture> ta = upload(a, 1, 0), tb = upload(b, 1, 0);
+            id<MTLCommandBuffer> cb = [gQ commandBuffer];
+            MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+            rp.colorAttachments[0].texture = t; rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+            rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0); rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+            id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];          // what was on screen: A
+            [e setRenderPipelineState:cp]; [e setFragmentTexture:ta atIndex:0]; [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3]; [e endEncoding];
+            rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+            e = [cb renderCommandEncoderWithDescriptor:rp];                                       // this frame's windows: B
+            [e setRenderPipelineState:cp]; [e setFragmentTexture:tb atIndex:0]; [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3]; [e endEncoding];
+            for (int lv = 0; lv < 4; lv++) {                                                      // B down the levels of m
+                MTLRenderPassDescriptor *mp = [MTLRenderPassDescriptor renderPassDescriptor];
+                mp.colorAttachments[0].texture = m; mp.colorAttachments[0].level = lv;
+                mp.colorAttachments[0].loadAction = lv ? mipLoad : MTLLoadActionDontCare; mp.colorAttachments[0].storeAction = MTLStoreActionStore;
+                mp.colorAttachments[0].clearColor = MTLClearColorMake(1, 0, 1, 1);
+                e = [cb renderCommandEncoderWithDescriptor:mp];
+                [e setRenderPipelineState:lv ? lp : dp];
+                if (lv) {   // level lv from level lv-1 of the same texture, through a pipeline that samples an explicit level
+                    const float l = (float)(lv - 1); [e setFragmentBytes:&l length:sizeof l atIndex:0];
+                    [e setFragmentTexture:m atIndex:0];
+                } else [e setFragmentTexture:t atIndex:0];
+                [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3]; [e endEncoding];
+            }
+            e = [cb renderCommandEncoderWithDescriptor:rp];                                       // the material over the target
+            const float l3 = 3; [e setRenderPipelineState:sp]; [e setFragmentTexture:m atIndex:0]; [e setFragmentBytes:&l3 length:sizeof l3 atIndex:0];
+            [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3]; [e endEncoding];
+            id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder]; [bl synchronizeResource:t]; [bl endEncoding];
+            [cb commit]; [cb waitUntilCompleted];
+            IOSurfaceLock(surf, kIOSurfaceLockReadOnly, NULL);
+            const uint8_t *base = IOSurfaceGetBaseAddress(surf); const size_t bpr = IOSurfaceGetBytesPerRow(surf);
+            for (int y = 0; y < H; y++) memcpy(got + (size_t)y * W * 4, base + (size_t)y * bpr, (size_t)W * 4);
+            IOSurfaceUnlock(surf, kIOSurfaceLockReadOnly, NULL);
+            cpu_backdrop(a, ea); cpu_backdrop(b, eb);
+            int md; const double db = meandiff(got, eb, W * H, &md), da = meandiff(got, ea, W * H, &md);
+            double lum = 0; for (size_t i = 0; i < (size_t)W * H * 4; i += 4) lum += got[i] + got[i + 1] + got[i + 2];
+            lum /= (double)W * H * 3;
+            if (db < 6) ok++; else if (da < 6) olda++; else if (lum < 8) black++; else other++;
+            if (db > worst) worst = db;
+            if (f == 0) png(variant ? "ws.backdrop-clear" : "ws.backdrop-load", got, W, H);
+        }
+        result(variant ? "ws.backdrop-clear" : "ws.backdrop-load", ok == 10,
+               [NSString stringWithFormat:@"%d/10 frames B blurred+saturated, %d from the old picture A, %d black, %d other; worst mean diff %.1f (mip passes %s)",
+                ok, olda, black, other, worst, variant ? "Clear" : "Load"]);
+    }
+    free(a); free(b); free(ea); free(eb); free(got);
+    CFRelease(surf);
+}
+
 int main(int argc, char **argv)
 {
     @autoreleasepool {
@@ -502,6 +591,7 @@ int main(int argc, char **argv)
         RUN("ca.layerblur", t_ca("ca.layerblur", NO));
         RUN("ca.backdrop", t_ca("ca.backdrop", YES));
         RUN("ws.selfsample", t_selfsample());
+        RUN("ws.backdrop", t_backdrop());
         RUN("metal.rtt_sample", t_rtt_sample());
         RUN("metal.genmips", t_genmips());
         RUN("metal.render_mip", t_render_mip());
