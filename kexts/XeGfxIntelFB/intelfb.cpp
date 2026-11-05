@@ -306,7 +306,18 @@ class XeGfxIntelFramebuffer : public IONDRVFramebuffer {
     bool curSetup() {
         int off = 0;
         if (PE_parse_boot_argn("-xeintelfbnohwc", &off, sizeof off) || !fR) return false;
-        if (rd(XIFB_CUR_CTL) || rd(XIFB_P1_SURF) != 0xff000000u || rd(XIFB_P1_BUF) != 0x07ff0000u) {
+        // [gu605-mac] WAS: the GOP's plane at GGTT 0xff000000 only. On GU605 Eco boots the GOP put its 16,384,000-byte
+        // framebuffer at 0xf8000000 (2026-11-05 11:11, 11:25), so the cursor stayed in software and, once WindowServer
+        // ran on the Intel GPU with zero-copy flips, left trails in the menu bar. What matters is that the GOP's block
+        // ends at or below our 64 cursor pages at 0xfffa0000 (i915's reserved top of GGTT, above GuC's range).
+        const uint32_t gopSurf = rd(XIFB_P1_SURF) & 0xfffff000u, curEnd = XIFB_CUR_GGTT + XIFB_CUR_DIM * XIFB_CUR_DIM * 4;
+        const bool gopClear = gopSurf + 16384000u <= XIFB_CUR_GGTT || gopSurf >= curEnd;
+        if (gopSurf != 0xff000000u) {
+            volatile uint64_t *g = (volatile uint64_t *)((volatile uint8_t *)fR + XIFB_GSM) + (XIFB_CUR_GGTT >> 12);
+            XIFBLOG("hw cursor: GOP plane at GGTT %08x (%s our cursor pages); PTE at %08x now %016llx", gopSurf,
+                    gopClear ? "clear of" : "OVERLAPS", XIFB_CUR_GGTT, (unsigned long long)g[0]);
+        }
+        if (rd(XIFB_CUR_CTL) || !gopClear || rd(XIFB_P1_BUF) != 0x07ff0000u) {
             XIFBLOG("hw cursor off: display not as the GOP left it (cur %08x surf %08x buf %08x)", rd(XIFB_CUR_CTL),
                     rd(XIFB_P1_SURF), rd(XIFB_P1_BUF));
             return false;
