@@ -77,7 +77,8 @@ if [ $dr = 10 ]; then
   # logout alone never brought the Intel desktop. When the console goes back to the login window, restart it here.
   for i in $(seq 1 $((wmin * 6))); do now=$(pgrep -x WindowServer | head -1); [ -n "$now" ] && [ "$now" != "$old" ] && break
     cu=$(stat -f %Su /dev/console 2>/dev/null)
-    case "$cu" in root|loginwindow|"") say "logged out (console $cu): restarting WindowServer"; killall WindowServer 2>/dev/null; sleep 10 ;; esac
+    case "$cu" in root|loginwindow|"") say "logged out (console $cu): restarting WindowServer"; killall WindowServer 2>/dev/null; sleep 3
+      [ "$(pgrep -x WindowServer | head -1)" != "$old" ] || launchctl kickstart -k system/com.apple.WindowServer; sleep 7 ;; esac
     sleep 10; done
   now=$(pgrep -x WindowServer | head -1)
   [ -n "$now" ] && [ "$now" != "$old" ] || finish "armed, no logout within $wmin min: the desktop stayed on the firmware framebuffer this boot"
