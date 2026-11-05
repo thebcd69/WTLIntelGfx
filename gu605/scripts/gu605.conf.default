@@ -10,3 +10,9 @@ WSMARK=1
 K5=1
 # copy each run's summary to <EFI>/GU605/ (readable from Windows); 0 = never mount the EFI
 EFI_LOG=1
+# desktop step when someone is already logged in (gu605-desktop.sh): auto = an automatic login left idle restarts
+# WindowServer after a 20 s notice, else at the next logout | logout = always at the next logout | skip = never
+DESKTOP_LOGGED_IN=auto
+DESKTOP_AUTOLOGIN_S=150
+DESKTOP_IDLE_S=60
+DESKTOP_WAIT_MIN=120

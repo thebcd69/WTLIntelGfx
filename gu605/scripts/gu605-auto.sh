@@ -64,11 +64,23 @@ bash "$G/gu605-metal-check.sh" "$R/metal"; mc=$?
 nvram gu605-pending=0
 [ $mc = 0 ] || finish "Metal check failed (see metal/)"
 [ "$LEVEL" = metal ] && finish "metal done"
-# desktop: only at the login window (it restarts WindowServer)
-cu=$(stat -f %Su /dev/console 2>/dev/null)
-case "$cu" in ""|root|_*) ;; *) finish "$cu logged in before the desktop step: skipped this boot (log out, or run sudo $G/gu605-desktop.sh with FORCE=1)";; esac
+# desktop: gu605-desktop.sh decides when WindowServer restarts (login window, automatic login left idle, or the next
+# logout: exit 10, armed and waiting)
 nvram gu605-pending=1; sync
-if ! bash "$G/gu605-desktop.sh" "$R/desktop"; then nvram gu605-pending=0; finish "desktop step stopped before the restart (see desktop/)"; fi
+bash "$G/gu605-desktop.sh" "$R/desktop"; dr=$?
+if [ $dr = 10 ]; then
+  # a shutdown while waiting is not a failed run: the pending mark is set again only when WindowServer restarts
+  nvram gu605-pending=0; sync
+  wmin=$(conf DESKTOP_WAIT_MIN 120); old=$(pgrep -x WindowServer | head -1)
+  say "desktop armed; waiting up to $wmin min for the next logout (WindowServer $old)"
+  for i in $(seq 1 $((wmin * 6))); do now=$(pgrep -x WindowServer | head -1); [ -n "$now" ] && [ "$now" != "$old" ] && break; sleep 10; done
+  now=$(pgrep -x WindowServer | head -1)
+  [ -n "$now" ] && [ "$now" != "$old" ] || finish "armed, no logout within $wmin min: the desktop stayed on the firmware framebuffer this boot"
+  nvram gu605-pending=1; sync
+  nohup bash "$R/desktop/guard.sh" "$AL" "$R/desktop/guard.log" > /dev/null 2>&1 < /dev/null & disown
+  echo "$(date +%T) WindowServer start #1 (pid $now, after logout)" >> "$R/desktop/guard.log"
+  say "logout seen: WindowServer $old -> $now"
+elif [ $dr != 0 ]; then nvram gu605-pending=0; finish "desktop step stopped before the restart (see desktop/)"; fi
 say "WindowServer on the Intel GPU; confirming in 3 minutes"
 sleep 180
 frames=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); frames=${frames:-0}
