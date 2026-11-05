@@ -17,10 +17,12 @@ BP=$G/tools/blurprobe; PL=$XB/Contents/MacOS/XeMTLDriver
 [ -x "$BP" ] || { say "no $BP (package tools/blurprobe, or build it: see userland/tools/blurprobe.m)"; exit 2; }
 [ "$(ioreg -r -c NMXAccel -d 1 | grep -c NMXAccel)" -gt 0 ] || { say "no NMXAccel: stage 7 has not run this boot"; exit 2; }
 say "== blurprobe A/B ($(date))"
+# NVMTL_ENABLE=1: the plugin hands a device only to allow-listed processes (and mtlprobe/nvmtltest by name); blurprobe
+# is neither, so without it every run ended "no Intel Metal device" (Mac, 2026-11-05 12:45)
 run() {   # run <tag> [env...]
   local t=$1 c; shift
   c=$(mktemp -d /tmp/xemtl-blur.XXXXXX); mkdir -p "$c/aircache"
-  env "$@" NVMTL_LOG_PATH="$c/nvmtl.log" NVMTL_AIRCACHE="$c/aircache" NM_TEST_PLUGIN="$PL" "$BP" "$R/$t" > "$R/$t.txt" 2>&1
+  env "$@" NVMTL_ENABLE=1 NVMTL_LOG_PATH="$c/nvmtl.log" NVMTL_AIRCACHE="$c/aircache" NM_TEST_PLUGIN="$PL" "$BP" "$R/$t" > "$R/$t.txt" 2>&1
   local rc=$?
   cp "$c/nvmtl.log" "$R/$t-nvmtl.log" 2>/dev/null; rm -rf "$c"
   say "-- $t (exit $rc)"; grep -E '^(TEST|device|blurprobe)' "$R/$t.txt" | tee -a "$S" > /dev/null
