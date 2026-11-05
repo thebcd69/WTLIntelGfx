@@ -27,6 +27,9 @@ Her açılışın özeti ayrıca `EFI/GU605/last-boot.txt`'e kendiliğinden yaz�
   `gu605-collect.sh`.
 - Test boyunca **uyku yok**: kapağı kapatma, Uyku menüsünü kullanma (i915'in uyku/uyanma desteği yok; uyanışta
   ekran gelmeyebilir).
+- Masaüstü adımı (`ECO_LEVEL=desktop`) otomatik girişle de çalışır: giriş yapılmışsa ve 60 sn dokunulmadıysa
+  20 sn önce bildirim gelir, sonra ekran bir kez kararır ve oturum kapanır (tekrar giriş yap). Bildirim sırasında
+  klavyeye/izleme dörtgenine dokunursan iptal olur; masaüstü bir sonraki **Çıkış**'ta (Apple menüsü) Intel'e geçer.
 - Masaüstü adımı (WindowServer Intel GPU'da) sonraki test: `gu605.conf`'ta `ECO_LEVEL=desktop`.
 
 ## Test 3 — Standard (isteğe bağlı, 1 açılış, 2 dk)

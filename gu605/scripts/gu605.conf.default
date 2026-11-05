@@ -16,3 +16,9 @@ EFI_LOG=1
 DISPLAY=adopt
 # internal panel refresh after the KMS takeover (Hz; empty or 0 = leave the firmware's)
 PANEL_HZ=240
+# desktop step when someone is already logged in (gu605-desktop.sh): auto = an automatic login left idle restarts
+# WindowServer after a 20 s notice, else at the next logout | logout = always at the next logout | skip = never
+DESKTOP_LOGGED_IN=auto
+DESKTOP_AUTOLOGIN_S=150
+DESKTOP_IDLE_S=60
+DESKTOP_WAIT_MIN=120
