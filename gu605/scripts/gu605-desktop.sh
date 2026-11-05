@@ -55,8 +55,40 @@ sysctl -w debug.nvaccel_iop=1 > /dev/null || die "debug.nvaccel_iop=1 failed"
   ioreg -l -w0 -r -c NMXAccel; ioreg -l -w0 -r -c XeGfxIntelFramebuffer; } > "$R/state-before-restart.txt" 2>&1
 klog 10m > "$R/kernel-10m.txt"; sync
 
+# When to restart WindowServer (the screen goes dark once and the session ends):
+#   nobody logged in (login window)            -> now
+#   FORCE=1                                    -> now
+#   logged in, DESKTOP_LOGGED_IN=auto (default): the session is an automatic login (started within DESKTOP_AUTOLOGIN_S,
+#     default 150 s, of boot) and nobody touched keyboard or trackpad for DESKTOP_IDLE_S (default 60 s) -> a 20 s
+#     notice, then now unless there was input meanwhile; otherwise -> at the next logout
+#   DESKTOP_LOGGED_IN=logout                   -> at the next logout (armed now, nothing restarted; exit 10)
+#   DESKTOP_LOGGED_IN=skip                     -> stop (the old behaviour)
+idle_s() { ioreg -c IOHIDSystem -d 4 2>/dev/null | awk '/"HIDIdleTime"/ {print int($NF / 1000000000); exit}'; }
+etime_s() { awk -F'[-:]' '{ n = NF; s = $n + 60 * $(n-1); if (n >= 3) s += 3600 * $(n-2); if (n >= 4) s += 86400 * $(n-3); print s }' <<< "$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"; }
+notify() { local u=$1 msg=$2 uid; uid=$(id -u "$u" 2>/dev/null) || return 0
+  launchctl asuser "$uid" sudo -u "$u" osascript -e "display notification \"$msg\" with title \"GU605\"" > /dev/null 2>&1 || true; }
+MODE=now
 cu=$(stat -f %Su /dev/console 2>/dev/null)
-case "$cu" in ""|root|_*) ;; *) [ "${FORCE:-0}" = 1 ] || die "$cu is logged in: WindowServer is not restarted under a session (FORCE=1 to do it)";; esac
+case "$cu" in ""|root|_*) ;; *)
+  if [ "${FORCE:-0}" = 1 ]; then say "$cu is logged in; FORCE=1: restarting anyway"
+  else
+    pol=$(conf DESKTOP_LOGGED_IN auto)
+    case "$pol" in
+      skip) die "$cu is logged in and DESKTOP_LOGGED_IN=skip" ;;
+      logout) MODE=logout ;;
+      *) MODE=logout
+         dock=$(pgrep -u "$cu" -x Dock | head -1); up=$(( $(date +%s) - $(sysctl -n kern.boottime | sed -E 's/.*sec = ([0-9]+).*/\1/') ))
+         age=$([ -n "$dock" ] && etime_s "$dock" || echo "$up"); login_at=$(( up - ${age:-$up} )); idle=$(idle_s)
+         say "$cu logged in ${login_at}s after boot, session ${age}s old, idle ${idle:-?}s"
+         if [ "$login_at" -le "$(conf DESKTOP_AUTOLOGIN_S 150)" ] && [ "${idle:-0}" -ge "$(conf DESKTOP_IDLE_S 60)" ]; then
+           notify "$cu" "20 sn sonra ekran bir kez kararacak ve oturum kapanacak (masaüstü Intel GPU'ya geçiyor). Klavye/izleme dörtgenine dokunursan iptal olur ve çıkış yaptığında olur."
+           sleep 20; idle2=$(idle_s)
+           if [ "${idle2:-0}" -ge 20 ]; then MODE=now; say "automatic login, no input: restarting now"
+           else say "input during the notice (idle ${idle2:-?}s): waiting for the next logout instead"; fi
+         fi ;;
+    esac
+  fi ;;
+esac
 
 # crash-loop guard, detached: >2 WindowServer starts in 10 minutes turn the Intel device off for WindowServer
 cat > "$R/guard.sh" <<'EOF'
@@ -76,6 +108,12 @@ for i in $(seq 1 600); do
 done
 echo "$(date +%T) guard done: $starts WindowServer start(s) in 10 minutes" >> "$G"; sync
 EOF
+if [ "$MODE" = logout ]; then
+  echo logout > "$R/restart-mode"
+  notify "$cu" "Intel masaüstü hazır: bir sonraki oturum kapatmada (Apple menüsü > Çıkış) devreye girer."
+  say "armed; WindowServer NOT restarted: the next logout brings the desktop to the Intel GPU (the runner waits for it)"
+  sync; exit 10
+fi
 nohup bash "$R/guard.sh" "$AL" "$R/guard.log" > /dev/null 2>&1 < /dev/null &
 disown
 say "5. WindowServer restart (the screen goes dark once, then the login window)"
