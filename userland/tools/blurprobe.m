@@ -12,10 +12,13 @@
 //   ca.backdrop        CARenderer: a CABackdropLayer with gaussianBlur + colorSaturate (what NSVisualEffectView
 //                      builds) over moving content, 30 frames: blurred / unblurred / other per frame (flicker)
 //   ca.layerblur       CARenderer: a plain layer with a gaussianBlur filter (content blur, not backdrop)
+//   ws.selfsample      what WindowServer does for a backdrop: an IOSurface target, one command buffer; pass 1 draws
+//                      picture A, pass 2 (Load, and again with Clear) draws picture B, a render-target memory barrier,
+//                      then a draw that samples the target itself (another region) -- it must see B, not A (x20)
 // Exit 0 when every test passed. Build (Command Line Tools only):
 //   clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal \
 //     -framework QuartzCore -framework CoreImage -framework MetalPerformanceShaders -framework ImageIO \
-//     -framework CoreGraphics -framework IOKit blurprobe.m -o blurprobe
+//     -framework CoreGraphics -framework IOKit -framework IOSurface blurprobe.m -o blurprobe
 // <wtl> project: xegfx (GU605 branch) | BSD-2-Clause </wtl>
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -24,6 +27,7 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #import <ImageIO/ImageIO.h>
 #import <IOKit/IOKitLib.h>
+#import <IOSurface/IOSurface.h>
 #include <dlfcn.h>
 #include <math.h>
 #include <objc/message.h>
@@ -153,6 +157,9 @@ static NSString *const kShaders =
      "  constexpr sampler s(filter::nearest, mip_filter::nearest); return t.sample(s, v.uv, level(l)); }\n"
      "fragment float4 down2(V v [[stage_in]], texture2d<float> t [[texture(0)]]) {\n"
      "  constexpr sampler s(filter::linear, address::clamp_to_edge); return t.sample(s, v.uv); }\n"
+     "fragment float4 offbox(V v [[stage_in]], texture2d<float> t [[texture(0)]], constant float2 &o [[buffer(0)]]) {\n"
+     "  constexpr sampler s(filter::nearest, address::clamp_to_edge); float dx = 1.0 / t.get_width(); float4 a = 0;\n"
+     "  for (int k = -4; k <= 4; k++) a += t.sample(s, v.uv + o + float2(k * dx, 0)); return a / 9; }\n"
      "kernel void hblur(texture2d<float, access::read> src [[texture(0)]], texture2d<float, access::write> dst [[texture(1)]],\n"
      "                  uint2 g [[thread_position_in_grid]], uint2 l [[thread_position_in_threadgroup]], uint2 tg [[threadgroup_position_in_grid]]) {\n"
      "  threadgroup float4 tile[64 + 16]; int x0 = int(tg.x) * 64 - 8; int w = int(src.get_width());\n"
@@ -397,6 +404,76 @@ static void t_ca(const char *name, BOOL backdrop)
     free(src); free(got);
 }
 
+// WindowServer's backdrop read, on an IOSurface target: content drawn earlier in the same command buffer and pass must be
+// what a later draw samples after memoryBarrier(renderTargets). Classifies each frame: B (correct), A (the pass's
+// starting pixels: a copy taken before the pass), other (stale / black / undefined).
+static void t_selfsample_one(BOOL loadPass, int *okN, int *aN, int *otherN, double *worst, int frames)
+{
+    id<MTLRenderPipelineState> cp = pso(@"copy"), op = pso(@"offbox");
+    if (!cp || !op) { (*otherN) += frames; return; }
+    NSDictionary *props = @{ (id)kIOSurfaceWidth: @W, (id)kIOSurfaceHeight: @H, (id)kIOSurfaceBytesPerElement: @4,
+                             (id)kIOSurfacePixelFormat: @((uint32_t)'BGRA') };
+    IOSurfaceRef surf = IOSurfaceCreate((__bridge CFDictionaryRef)props);
+    MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:W height:H mipmapped:NO];
+    d.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead; d.storageMode = MTLStorageModeManaged;
+    id<MTLTexture> t = surf ? [gDev newTextureWithDescriptor:d iosurface:surf plane:0] : nil;
+    if (!t) { printf("  no IOSurface texture\n"); (*otherN) += frames; if (surf) CFRelease(surf); return; }
+    uint8_t *a = malloc(W * H * 4), *b = malloc(W * H * 4), *ba = malloc(W * H * 4), *bb = malloc(W * H * 4), *got = malloc(W * H * 4);
+    const int sx = 64, dx0 = 320, dx1 = 448, y0 = 32, y1 = H - 32;   // read x 64..192, write x 320..448
+    const float off[2] = { -(float)(dx0 - sx) / W, 0 };
+    for (int f = 0; f < frames; f++) {
+        pattern(a, 1 + f); pattern(b, 7 + 3 * f);
+        for (size_t i = 0; i < (size_t)W * H * 4; i += 4) { uint8_t q = b[i]; b[i] = b[i + 2]; b[i + 2] = q; }   // B: other colours too
+        id<MTLTexture> ta = upload(a, 1, 0), tb = upload(b, 1, 0);
+        id<MTLCommandBuffer> cb = [gQ commandBuffer];
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = t; rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake(1, 0, 1, 1); rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        id<MTLRenderCommandEncoder> e = [cb renderCommandEncoderWithDescriptor:rp];   // pass 1: picture A
+        [e setRenderPipelineState:cp]; [e setFragmentTexture:ta atIndex:0]; [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [e endEncoding];
+        rp.colorAttachments[0].loadAction = loadPass ? MTLLoadActionLoad : MTLLoadActionClear;
+        e = [cb renderCommandEncoderWithDescriptor:rp];                                // pass 2: picture B, then the backdrop read
+        [e setRenderPipelineState:cp]; [e setFragmentTexture:tb atIndex:0]; [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [e memoryBarrierWithScope:MTLBarrierScopeRenderTargets afterStages:MTLRenderStageFragment beforeStages:MTLRenderStageFragment];
+        [e setRenderPipelineState:op]; [e setFragmentTexture:t atIndex:0]; [e setFragmentBytes:off length:sizeof off atIndex:0];
+        [e setScissorRect:(MTLScissorRect){ dx0, y0, dx1 - dx0, y1 - y0 }];
+        [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [e endEncoding];
+        id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder]; [bl synchronizeResource:t]; [bl endEncoding];
+        [cb commit]; [cb waitUntilCompleted];
+        IOSurfaceLock(surf, kIOSurfaceLockReadOnly, NULL);
+        const uint8_t *base = IOSurfaceGetBaseAddress(surf); const size_t bpr = IOSurfaceGetBytesPerRow(surf);
+        for (int y = 0; y < H; y++) memcpy(got + (size_t)y * W * 4, base + (size_t)y * bpr, (size_t)W * 4);
+        IOSurfaceUnlock(surf, kIOSurfaceLockReadOnly, NULL);
+        cpu_box(a, ba, 4); cpu_box(b, bb, 4);
+        double eb = 0, ea = 0; long n = 0;
+        for (int y = y0; y < y1; y++)
+            for (int x = dx0; x < dx1; x++, n++)
+                for (int c = 0; c < 3; c++) {
+                    const int g = got[((size_t)y * W + x) * 4 + c];
+                    eb += abs(g - bb[((size_t)y * W + x - (dx0 - sx)) * 4 + c]); ea += abs(g - ba[((size_t)y * W + x - (dx0 - sx)) * 4 + c]);
+                }
+        eb /= n * 3; ea /= n * 3;
+        if (eb < 3) (*okN)++; else if (ea < 3) (*aN)++; else (*otherN)++;
+        if (eb > *worst) *worst = eb;
+        if (f == 0) png(loadPass ? "ws.selfsample-load" : "ws.selfsample-clear", got, W, H);
+    }
+    free(a); free(b); free(ba); free(bb); free(got);
+    CFRelease(surf);
+}
+static void t_selfsample(void)
+{
+    const int frames = 20;
+    for (int k = 0; k < 2; k++) {
+        int ok = 0, sa = 0, other = 0; double worst = 0;
+        t_selfsample_one(k == 0, &ok, &sa, &other, &worst, frames);
+        result(k == 0 ? "ws.selfsample-load" : "ws.selfsample-clear", ok == frames,
+               [NSString stringWithFormat:@"%d/%d frames read what the pass drew, %d read the pass's starting pixels (pre-pass copy), %d other (stale/black); worst mean diff %.1f",
+                ok, frames, sa, other, worst]);
+    }
+}
+
 int main(int argc, char **argv)
 {
     @autoreleasepool {
@@ -412,22 +489,25 @@ int main(int argc, char **argv)
                 if ([d.name rangeOfString:@"Intel" options:NSCaseInsensitiveSearch].location != NSNotFound) gDev = d;
         }
         if (!gDev) { printf("no Intel Metal device\n"); return 2; }
-        printf("device %s (INTEL_DEBUG=%s NVMTL_NO_FBFETCH=%s NVMTL_NO_DIRTYONLY=%s)\n", gDev.name.UTF8String,
-               getenv("INTEL_DEBUG") ?: "-", getenv("NVMTL_NO_FBFETCH") ?: "-", getenv("NVMTL_NO_DIRTYONLY") ?: "-");
+        printf("device %s (INTEL_DEBUG=%s NVMTL_NO_FBFETCH=%s NVMTL_NO_DIRTYONLY=%s NVMTL_XE_SELF_SAMPLE=%s NVMTL_XE_SAMPLE_GENERAL=%s)\n", gDev.name.UTF8String,
+               getenv("INTEL_DEBUG") ?: "-", getenv("NVMTL_NO_FBFETCH") ?: "-", getenv("NVMTL_NO_DIRTYONLY") ?: "-",
+               getenv("NVMTL_XE_SELF_SAMPLE") ?: "-", getenv("NVMTL_XE_SAMPLE_GENERAL") ?: "-");
         gQ = [gDev newCommandQueue];
         NSError *e = nil;
         gLib = [gDev newLibraryWithSource:kShaders options:nil error:&e];
         if (!gLib) { printf("shaders: %s\n", e.localizedDescription.UTF8String); return 3; }
         const char *only = getenv("BLURPROBE_ONLY");   // e.g. "ca." or "metal.render_mip"
 #define RUN(n, call) do { if (!only || strstr(n, only)) { call; } } while (0)
+        // Core Animation first: CARenderer came back nil when it ran after the Core Image / MPS tests in one process
+        RUN("ca.layerblur", t_ca("ca.layerblur", NO));
+        RUN("ca.backdrop", t_ca("ca.backdrop", YES));
+        RUN("ws.selfsample", t_selfsample());
         RUN("metal.rtt_sample", t_rtt_sample());
         RUN("metal.genmips", t_genmips());
         RUN("metal.render_mip", t_render_mip());
         RUN("metal.compute_tg", t_compute_tg());
         RUN("ci.gaussian", t_ci());
         RUN("mps.gaussian", t_mps());
-        RUN("ca.layerblur", t_ca("ca.layerblur", NO));
-        RUN("ca.backdrop", t_ca("ca.backdrop", YES));
         printf("blurprobe: %d failed\n", gFails);
         return gFails ? 1 : 0;
     }

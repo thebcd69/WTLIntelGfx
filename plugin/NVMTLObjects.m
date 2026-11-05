@@ -3227,8 +3227,16 @@ static NVMTLBuffer *nvmtl_bytes_ring(NVMTLCommandBuffer *cb, NSUInteger len, siz
     // the pass samples its own target: read the copy taken before the pass (nvmtl_self_snap), else put a barrier before
     // its draws (nvmtl_self_tex_barrier); xe-live bit 256 turns both off
     if (_target && (nt->_parent ?: nt) == (_target->_parent ?: _target) && !(nvmtl_xe_live_mask_r(1) & 256)) {
-        if (_snap && !nt->_parent) nt = _snap;
-        else { _cb->_c.self_tex = 1; nvmtl_self_snap(_target->_parent ?: _target, YES); }
+        const int mode = nvmtl_vk_self_sample_mode();
+        if (mode == 2) {
+            // barrier mode (GU605 vibrancy): only a read of the attachment's own level is self-sampling; Core Animation's
+            // blur chains render level n while sampling level n-1 of the same texture, which needs nothing
+            const uint32_t lv = _pass.col_level[0], b = nt->_parent ? nt->_baseLevel : 0, m = (uint32_t)[nt mipmapLevelCount];
+            if (lv >= b && lv < b + m) _cb->_c.self_tex = 1;
+        } else if (mode == 1) {
+            if (_snap && !nt->_parent) nt = _snap;
+            else { _cb->_c.self_tex = 1; nvmtl_self_snap(_target->_parent ?: _target, YES); }
+        }
     }
     { NVMTLTexture *rt = nt->_parent ? nt->_parent : nt; nvtrace("FTEX[%lu] %ux%u surf %u view %d", (unsigned long)i, [nt nvi]->w, [nt nvi]->h,
         rt->_surf ? (unsigned)IOSurfaceGetID(rt->_surf) : 0u, nt->_parent != nil); }
@@ -3640,10 +3648,15 @@ static NVMTLBuffer *nvmtl_bytes_ring(NVMTLCommandBuffer *cb, NSUInteger len, siz
 - (void)useHeap:(id<MTLHeap>)h {}
 - (void)useHeap:(id<MTLHeap>)h stages:(MTLRenderStages)st {}
 - (void)sampleCountersInBuffer:(id)sb atSampleIndex:(NSUInteger)i withBarrier:(BOOL)b { nvmtl_sample_counter(_cb, sb, i, self, b); }
-- (void)textureBarrier { nvmtl_vk_cmd_barrier(&_cb->_c); }
+- (void)textureBarrier { nvmtl_vk_cmd_rt_barrier(&_cb->_c); }
 - (void)updateFence:(id<MTLFence>)f afterStages:(MTLRenderStages)st {}
 - (void)waitForFence:(id<MTLFence>)f beforeStages:(MTLRenderStages)st { nvmtl_vk_cmd_barrier(&_cb->_c); }
-- (void)memoryBarrierWithScope:(MTLBarrierScope)scope afterStages:(MTLRenderStages)a beforeStages:(MTLRenderStages)b { nvmtl_vk_cmd_barrier(&_cb->_c); }
+- (void)memoryBarrierWithScope:(MTLBarrierScope)scope afterStages:(MTLRenderStages)a beforeStages:(MTLRenderStages)b {
+    // barrier mode: render targets inside the pass take the self-dependency's barrier (nvmtl_vk_cmd_rt_barrier); a
+    // buffer/texture scope keeps the full one
+    if ((scope & MTLBarrierScopeRenderTargets) && !(scope & (MTLBarrierScopeBuffers | MTLBarrierScopeTextures))) nvmtl_vk_cmd_rt_barrier(&_cb->_c);
+    else nvmtl_vk_cmd_barrier(&_cb->_c);
+}
 - (void)memoryBarrierWithResources:(const id<MTLResource> __unsafe_unretained [])r count:(NSUInteger)n afterStages:(MTLRenderStages)a beforeStages:(MTLRenderStages)b { nvmtl_vk_cmd_barrier(&_cb->_c); }
 - (void)drawPrimitives:(MTLPrimitiveType)type indirectBuffer:(id<MTLBuffer>)buf indirectBufferOffset:(NSUInteger)off {
     NVMTLBuffer *nb = (NVMTLBuffer *)buf;
@@ -5138,7 +5151,7 @@ destinationBytesPerImage:(NSUInteger)img options:(MTLBlitOption)opt {
     // A target WindowServer samples inside its own pass: on Apple GPUs that read returns the pass's starting pixels
     // (tile memory), so give those draws a copy of the target taken before the pass begins.
     if (e->_target) nvmtl_surface_cpu_dump(e->_target->_parent ?: e->_target);   // the final display surface is never sampled
-    if (e->_target && d.colorAttachments[0].loadAction == MTLLoadActionLoad) {
+    if (e->_target && d.colorAttachments[0].loadAction == MTLLoadActionLoad && nvmtl_vk_self_sample_mode() == 1) {
         NVMTLTexture *r = e->_target->_parent ?: e->_target, *snap = nvmtl_self_snap(r, NO);
         if (snap && !(nvmtl_xe_live_mask_r(1) & 256) && !nvmtl_vk_cmd_copy_image(&_c, [r nvi], 0, 0, [snap nvi], 0, 0, [r nvi]->w, [r nvi]->h)) {
             e->_snap = snap; if (!_resources) _resources = [NVMTLResSet new]; [_resources addObject:snap]; }
