@@ -6972,7 +6972,7 @@ int nvmtl_vk_copy_image_to_buffer_layer(nvk_queue *q, nvk_image *img, uint32_t x
 }
 
 void nvmtl_vk_cmd_draw_indirect(nvk_cmdbuf *c, nvk_buffer *b, size_t off)
-{ if (c->nobind) return; NVMTL_SEMU_DRAW(c, pvkCmdDrawIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0)); }
+{ if (c->nobind) return; nvmtl_self_tex_barrier(c); NVMTL_SEMU_DRAW(c, pvkCmdDrawIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0)); }
 int nvmtl_vk_cmd_draw_patches(nvk_cmdbuf *c, const nvk_pipeline *p, uint64_t fac, uint32_t istride, float scale, uint64_t cpx, uint64_t pix,
                               uint32_t start, uint32_t count, uint32_t instances, uint32_t baseInstance, nvk_buffer *ind, size_t indoff)
 {
@@ -7003,6 +7003,7 @@ void nvmtl_vk_cmd_draw_indexed_indirect(nvk_cmdbuf *c, nvk_buffer *idx, size_t i
     if (!nvmtl_index_range_ok(idx, idxOff)) return;
     pvkCmdBindIndexBuffer(c->cb, (VkBuffer)idx->buf, idxOff, is32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
     if (c->nobind) return;
+    nvmtl_self_tex_barrier(c);   /* GU605: as the direct draws */
     NVMTL_SEMU_DRAW(c, pvkCmdDrawIndexedIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0));
 }
 void nvmtl_vk_cmd_dispatch_indirect(nvk_cmdbuf *c, nvk_pipeline *p, nvk_buffer *b, size_t off)
