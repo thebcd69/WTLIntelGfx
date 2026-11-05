@@ -14,7 +14,9 @@ die() { say "STOP: $*  (nothing was restarted)"; sync; exit 1; }
 klog() { log show --last "${1:-2m}" --style compact --predicate 'process == "kernel" AND (eventMessage CONTAINS[c] "nvaccel" OR eventMessage CONTAINS[c] "agdc" OR eventMessage CONTAINS[c] "nmx" OR eventMessage CONTAINS[c] "XeGfx" OR eventMessage CONTAINS[c] "framebuffer")' 2>/dev/null; }
 
 # NullMoth's NVAccel registers the same debug.nvaccel* names as XeGfxAccel: only one of them may run (Eco mode)
-loaded 'com\.nullmoth\.NVAccel' && die "NullMoth's NVAccel is loaded (Standard/Ultimate mode): the Intel desktop is Eco-only on this branch"
+# [gu605-mac] an NVAccel INSTANCE, not the kext being loaded: after login the kext was loaded with no instance (GFX0's
+# node, ids cached, matched its personality; probe declined) and NullMoth registers debug.nvaccel* only in start()
+[ "$(ioreg -r -c NVAccel -d 1 2>/dev/null | grep -c '<class NVAccel')" -gt 0 ] && die "NullMoth's NVAccel is running (Standard/Ultimate mode): the Intel desktop is Eco-only on this branch"
 [ -d "$XB" ] || die "$XB missing (gu605-install.sh)"
 [ -f "$XU/libvulkan_intel.dylib" ] || die "Mesa ANV missing ($XU/libvulkan_intel.dylib): userland not installed"
 [ -f "$XB/Contents/MacOS/air-runtime/libLLVM.dylib" ] || [ -x "$XU/air-opt" ] || die "no AIR bitcode reader in $XB (WindowServer would crash on CoreDisplay's shaders)"
