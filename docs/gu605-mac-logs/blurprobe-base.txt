@@ -1,0 +1,10 @@
+device Intel Meteor Lake Xe-LPG (INTEL_DEBUG=- NVMTL_NO_FBFETCH=- NVMTL_NO_DIRTYONLY=-)
+TEST metal.rtt_sample: PASS 0/40 frames off the CPU box blur (worst mean diff 0.00)
+TEST metal.genmips: PASS sampled level 2 vs CPU 4x4 box: mean 0.41 max 1; level 2 copied back: mean 0.41 max 1
+TEST metal.render_mip: PASS level 2 rendered from level 1 rendered from level 0, vs CPU 4x4 box: mean 0.41 max 1 (magenta = never rendered)
+TEST metal.compute_tg: PASS vs CPU 17-tap box: mean 0.00 max 0
+TEST ci.gaussian: PASS vs software renderer: mean 0.24 max 2; detail 0.0 (software 0.0, source 27.2)
+TEST mps.gaussian: PASS detail 27.2 -> 1.1, saturation 95.4 -> 50.1 (blurred: detail < 20%, not black)
+TEST ca.layerblur: FAIL setup: renderer 0 CAFilter 1 CABackdropLayer 1
+TEST ca.backdrop: FAIL setup: renderer 0 CAFilter 1 CABackdropLayer 1
+blurprobe: 2 failed

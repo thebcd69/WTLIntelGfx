@@ -1,0 +1,11 @@
+[X=1] TEST ca.backdrop: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 1.2, saturation 95.4 -> 244.4
+[X=1] TEST ca.layerblur: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 0.0, saturation 95.4 -> 47.5
+[NVMTL_NO_FBFETCH=1] TEST ca.backdrop: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 1.2, saturation 95.4 -> 244.4
+[NVMTL_NO_FBFETCH=1] TEST ca.layerblur: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 0.0, saturation 95.4 -> 47.5
+[INTEL_DEBUG=noccs] TEST ca.backdrop: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 1.2, saturation 95.4 -> 244.4
+[INTEL_DEBUG=noccs] TEST ca.layerblur: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 0.0, saturation 95.4 -> 47.5
+[INTEL_DEBUG=nofc] TEST ca.backdrop: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 1.2, saturation 95.4 -> 244.4
+[INTEL_DEBUG=nofc] TEST ca.layerblur: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 0.0, saturation 95.4 -> 47.5
+[NVMTL_NO_FBFETCH=1 INTEL_DEBUG=noccs,nofc] TEST ca.backdrop: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 1.2, saturation 95.4 -> 244.4
+[NVMTL_NO_FBFETCH=1 INTEL_DEBUG=noccs,nofc] TEST ca.layerblur: PASS 30 blurred, 0 unblurred (see-through), 0 in between of 30 frames; detail 27.2 -> 0.0, saturation 95.4 -> 47.5
+DONE
