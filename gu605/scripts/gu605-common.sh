@@ -27,11 +27,30 @@ pci_display_present() {   # pci_display_present <vendor hex, e.g. 10de>
     END { if (ven == v && cls ~ /^0003/) found = 1; print found ? 1 : 0 }'
 }
 igpu_fb_present() { [ "$(ioreg -r -c XeGfxIntelFramebuffer -d 1 2>/dev/null | grep -c XeGfxIntelFramebuffer)" -gt 0 ] && echo 1 || echo 0; }
+# [gu605-mac] 1 when a framebuffer of ANY class, with a display attached, sits on the Intel display PCI device (8086, class 03): our
+# XeGfxIntelFramebuffer, or Apple's IONDRVFramebuffer (.Display_boot) when ours did not start. WAS: only our class
+# counted, so an Eco boot where XeGfxIntelFB failed was taken for Ultimate (2026-11-05 10:53).
+igpu_drives_panel() {
+  [ "$(igpu_fb_present)" = 1 ] && { echo 1; return; }
+  local n
+  for n in $(ioreg -r -c IOPCIDevice -d 1 -l -w0 2>/dev/null | awk '
+      /^\+-o / { if (ven == "8086" && cls ~ /^0003/) print name; name = $2; sub(/@.*/, "", name); ven = ""; cls = "" }
+      /"vendor-id" = </ { s = $0; sub(/.*</, "", s); sub(/>.*/, "", s); ven = substr(s, 3, 2) substr(s, 1, 2) }
+      /"class-code" = </ { s = $0; sub(/.*</, "", s); sub(/>.*/, "", s); cls = substr(s, 7, 2) substr(s, 5, 2) substr(s, 3, 2) substr(s, 1, 2) }
+      END { if (ven == "8086" && cls ~ /^0003/) print name }'); do
+    # a framebuffer with a display attached (an idle IONDRVFramebuffer on the iGPU in Ultimate has none)
+    ioreg -r -n "$n" -d 5 -w0 2>/dev/null | awk '/<class (IONDRVFramebuffer|XeGfxIntelFramebuffer|NMIntelFB)/ {f=1} /<class (AppleBacklightDisplay|AppleDisplay)/ {d=1} END {exit !(f && d)}' && { echo 1; return; }
+  done
+  echo 0
+}
+# [gu605-mac] 1 when NVIDIA's driver is live (NVRM bound to GFX0). WAS: pci_display_present 10de, which also counts GFX0's
+# IOPCIDevice node, which stays in ioreg with its cached ids when Eco has cut the dGPU's power (config space ffff:ffff).
+nvidia_live() { [ "$(ioreg -r -c NVRM -d 1 2>/dev/null | grep -c '<class NVRM')" -gt 0 ] && echo 1 || echo 0; }
 
-# G-Helper mode, as macOS sees it: eco (iGPU drives the panel, no NVIDIA), standard (iGPU panel, NVIDIA present),
-# ultimate (no iGPU framebuffer, NVIDIA present), unknown
+# G-Helper mode, as macOS sees it: eco (iGPU drives the panel, NVIDIA off), standard (iGPU drives the panel, NVIDIA
+# live), ultimate (NVIDIA live, iGPU not on the panel), unknown
 gpu_mode() {
-  local i n; i=$(igpu_fb_present); n=$(pci_display_present 10de)
+  local i n; i=$(igpu_drives_panel); n=$(nvidia_live)
   if [ "$i" = 1 ] && [ "$n" = 0 ]; then echo eco
   elif [ "$i" = 1 ]; then echo standard
   elif [ "$n" = 1 ]; then echo ultimate
