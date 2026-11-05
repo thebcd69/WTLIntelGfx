@@ -87,7 +87,19 @@
         XIFBLOG("display path: %s %ux%u %u mHz -> %s (%s)", name, w, h, mhz, ok ? "committed" : "REFUSED", msg);
         return ok;
     }
+    // i915 owns the planes, DBUF and watermarks now: the hardware cursor here programs cursor A and its DBUF share behind
+    // i915's back (its commits turn cursor A off and give the DBUF to plane 1), which ends in FIFO underruns. Software
+    // cursor until the cursor goes through i915's cursor plane.
+    void kmsCursorOff() {
+        if (!fCurReady || !fCurLock) return;
+        IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
+        fCurReady = false;
+        if (rd(XIFB_CUR_CTL)) { wr(XIFB_CUR_CTL, 0); wr(XIFB_CUR_BASE, rd(XIFB_CUR_BASE)); }
+        IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
+        XIFBLOG("display path: hardware cursor off (i915 owns the planes and DBUF), software cursor from now on");
+    }
     void kmsUpNow() {
+        kmsCursorOff();
         IODisplayModeID id = 0; IOIndex depth = 0; IODisplayModeInformation bi; bzero(&bi, sizeof bi);
         if (IONDRVFramebuffer::getCurrentDisplayMode(&id, &depth) != kIOReturnSuccess ||
             IONDRVFramebuffer::getInformationForDisplayMode(id, &bi) != kIOReturnSuccess || !bi.nominalWidth) {
@@ -156,7 +168,7 @@
     void kmsTick() {
         if (!fKmsUp) { if (xifbKmsService()) kmsUpNow(); }
         else { unsigned h = 0; if (xifbKmsCall(4, &h, nullptr, nullptr) && h != fKmsHot) { fKmsHot = h; kmsHotplug(); } }
-        kmsArm(fKmsUp ? 1000 : 2000);
+        kmsArm(fKmsUp ? 1000 : 500);
     }
     const XifbKmsMode *kmsMode(IODisplayModeID id) const {
         if (!fKmsUp || id < kKmsBase || id >= kKmsBase + (kKmsMax << 8) || (id & 0xff)) return nullptr;
