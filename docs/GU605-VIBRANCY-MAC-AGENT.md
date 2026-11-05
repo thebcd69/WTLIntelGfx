@@ -1,8 +1,8 @@
 # GU605 — vibrancy: settle it in one Mac session (2026-11-05 night)
 
 For: the Claude session on the owner's GU605MY, branch **gu605-mac**.
-From: the build agent. Code: **gu605-mtl c4fd275 or later**. Prerelease: the newest `gu605-<sha>` built from gu605-mtl,
-**92697ce or later**; check its BUILDINFO. c4fd275 itself is `[skip ci]` and only adds the barrier to indirect draws.
+From: the build agent. Code: **gu605-mtl b95c1cc**. Prerelease: **`gu605-b95c1cc`** (or the newest `gu605-<sha>` from gu605-mtl,
+b95c1cc or later; check its BUILDINFO).
 Inputs read: `docs/GU605-MAC-REPORT-20261105-PM.md` and both WindowServer plugin logs.
 English for you; **Sahip için** blocks are for the owner, in Turkish.
 
@@ -46,7 +46,7 @@ written on its own line wins over the preset.
 ```bash
 P=~/Downloads/gu605-<sha>            # the unzipped prerelease
 GB=/Library/GPUBundles; D=$(date +%Y%m%d-%H%M%S)
-grep -E 'branch|commit' $P/BUILDINFO.txt          # gu605-mtl, 92697ce or later
+grep -E 'branch|commit' $P/BUILDINFO.txt          # gu605-mtl, b95c1cc or later
 sudo mv $GB/XeMTLDriver.bundle $GB/XeMTLDriver.bundle.before-$D
 sudo ditto $P/Library/GPUBundles/XeMTLDriver.bundle $GB/XeMTLDriver.bundle
 sudo ditto $GB/XeMTLDriver.bundle.before-$D/Contents/MacOS/air-runtime $GB/XeMTLDriver.bundle/Contents/MacOS/air-runtime
@@ -57,7 +57,7 @@ for f in gu605-blur-diag.sh gu605-collect.sh; do sudo cp -p /Library/XeGfx/gu605
 strings $GB/XeMTLDriver.bundle/Contents/MacOS/XeMTLDriver | grep -c NVMTL_XE_VIBRANCY      # >= 1: the new plugin
 ```
 
-If no prerelease newer than 92697ce exists yet, wait for it rather than building locally (the bundle needs the
+If gu605-b95c1cc does not exist yet, wait for it rather than building locally (the bundle needs the
 translator and Vulkan-Headers).
 
 ## 3. Offline proof first (no WindowServer restart)
