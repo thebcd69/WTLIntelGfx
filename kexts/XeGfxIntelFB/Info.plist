@@ -43,6 +43,8 @@
 			<string>XeGfxIntelFramebuffer</string>
 			<key>IOMatchCategory</key>
 			<string>IOFramebuffer</string>
+			<key>IONameMatch</key>
+			<string>display</string>
 			<key>IOPCIMatch</key>
 			<string>0x7d558086</string>
 			<key>IOProbeScore</key>

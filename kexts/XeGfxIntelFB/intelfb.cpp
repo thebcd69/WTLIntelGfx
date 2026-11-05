@@ -399,8 +399,18 @@ public:
         if (xifbIsGu605(provider) && !xifbGu605OwnsPanel(provider)) return nullptr;
         return IONDRVFramebuffer::probe(provider, score);
     }
+    // [gu605-mac] XeGfxIntelFB-Start in ioreg: how far start() got, so a refused start is visible without the kernel
+    // log. IONDRVFramebuffer::start() only drives the device when IOKit matched it BY NAME (IONameMatched set, from
+    // the personality's IONameMatch "display"); otherwise it spawns IONDRVDevice nubs for display children in the
+    // device tree and returns false on purpose. The GU605 personality had no IONameMatch, so every start "FAILED" and
+    // Apple's IONDRVFramebuffer (IONameMatch display, score 20000) took IGPU as .Display_boot (2026-11-05 10:53 Eco).
+    void startStep(const char *step) { setProperty("XeGfxIntelFB-Start", step); }
     bool start(IOService *provider) override {
         fGu605 = xifbIsGu605(provider);
+        startStep("begin");
+        if (!getProperty(gIONameMatchedKey))
+            XIFBLOG("start: not matched by name (no IONameMatched): IONDRVFramebuffer::start will only make "
+                    "IONDRVDevice nubs and return false - the personality needs IONameMatch \"display\"");
         xifbGuardCount();
         // System Profiler names the GPU from the PCI device's "model"; without it About This Mac shows a bare "Display"
         if (!provider->getProperty("model")) {
@@ -447,6 +457,7 @@ public:
                     }
                 }
         }
+        startStep("edid/link done");
         if (!curSetup()) fCurReady = false;
         // samwu07's bootvram (console range, IOFBDependentID/Index, NVRMTiming): 7D55 only on this branch
         bool vram = fGu605 && OSDynamicCast(IOPCIDevice, provider) && xifbAddConsoleRange(provider);
@@ -456,7 +467,11 @@ public:
             if (fBacklight->attach(this)) fBacklight->registerService(kIOServiceSynchronous);
             else { OSSafeReleaseNULL(fBacklight); XIFBLOG("gu605 backlight: handler attach failed"); }
         }
+        startStep(getProperty(gIONameMatchedKey) ? "IONDRVFramebuffer::start (name matched)"
+                                                  : "IONDRVFramebuffer::start (NOT name matched: will return false)");
         bool ok = IONDRVFramebuffer::start(provider);
+        startStep(ok ? "started" : (getProperty(gIONameMatchedKey) ? "FAILED in IONDRVFramebuffer::start (name matched)"
+                                                                   : "FAILED: not matched by name (IONameMatch display missing)"));
         if (!ok && fBacklight) { fBacklight->detach(this); OSSafeReleaseNULL(fBacklight); }
         // the name is still the class name here; it becomes ".Display_boot" when the boot NDRV opens it
         XIFBLOG("IONDRVFramebuffer start %s, name %s", ok ? "ok" : "FAILED", getName());

@@ -11,7 +11,9 @@ sec() { echo; echo "===== $* ====="; }
 {
   echo "GU605 report $(date)"
   sec system; sw_vers; sysctl -n machdep.cpu.brand_string kern.bootargs kern.boottime; csrutil status 2>&1
-  sec mode; echo "mode $(gpu_mode)  iGPU-framebuffer $(igpu_fb_present)  NVIDIA $(pci_display_present 10de)"
+  sec mode; echo "mode $(gpu_mode)  XeGfxIntelFramebuffer $(igpu_fb_present)  iGPU-drives-panel $(igpu_drives_panel)  NVRM-live $(nvidia_live)  NVIDIA-PCI-node $(pci_display_present 10de)"
+  ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | grep '"XeGfxIntelFB-Start"'
+  log show --last boot --style compact --predicate 'process == "kernel" AND eventMessage CONTAINS "XeGfxIntelFB"' 2>/dev/null | grep -E 'IONDRVFramebuffer start|not matched by name' | tail -3
   sec "installed"; ls -la /Library/Extensions | grep -E 'XeGfx|XgFbMove|NVRM|NVAccel|NVPrimary|NMIntelFB'; ls -la "$GB" "$XU" 2>&1 | head -40
   cat "$G/VERSION" 2>/dev/null; cat "$CONF" 2>/dev/null; ls -la "$G" 2>&1
   sec "loaded kexts"; kmutil showloaded --list-only 2>/dev/null | grep -v com.apple
