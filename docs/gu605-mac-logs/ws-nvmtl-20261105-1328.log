@@ -1,0 +1,668 @@
+pid 157 NVMTL: NVMTLDevice +load in pid 157 (static class, image-owned) image 605A6E40-E7A4-3010-ACB3-0C3C2AFC3B0D /Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/XeMTLDriver at 2026-11-05T13:20:00+0300
+pid 157 NVMTL: NVMTLForward: forwarding net installed on 30 classes (was: log-then-abort on 20)
+pid 157 NVMTL: conf: 1 knob(s) read from /Library/GPUBundles/xemtl/nvrm610.conf, 0 inherited conf knob(s) forgotten first (the environment still wins)
+pid 157 NVMTL: GL vblank wait: -[NSCGLSurface synchronize] waits by the display's refresh period in WindowServer
+pid 157 NVMTL: -[NVMTLDevice initWithAcceleratorPort:344391] in WindowServer
+pid 157 NVMTL:   GPU vendor 8086 (Intel, ANV)
+pid 157 NVMTL:   'WindowServer' is armed-only and debug.nvaccelfb reads 0 -- no device (arm it with sysctl -w debug.nvaccelfb=1)
+pid 157 NVMTL:   not allow-listed: no device for WindowServer
+pid 2024 NVMTL: NVMTLDevice +load in pid 2024 (static class, image-owned) image 605A6E40-E7A4-3010-ACB3-0C3C2AFC3B0D /Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/XeMTLDriver at 2026-11-05T13:22:54+0300
+pid 2024 NVMTL: NVMTLForward: forwarding net installed on 30 classes (was: log-then-abort on 20)
+pid 2024 NVMTL: conf: 1 knob(s) read from /Library/GPUBundles/xemtl/nvrm610.conf, 0 inherited conf knob(s) forgotten first (the environment still wins)
+pid 2024 NVMTL: GL vblank wait: -[NSCGLSurface synchronize] waits by the display's refresh period in WindowServer
+pid 2024 NVMTL: -[NVMTLDevice initWithAcceleratorPort:85299] in WindowServer
+pid 2024 NVMTL:   GPU vendor 8086 (Intel, ANV)
+pid 2024 NVMTL:   allow-listed: WindowServer
+pid 2024 NVMTL: MTLIOAccelDevice's initWithAcceleratorPort: -> 0x7f88c8008000
+pid 2024 NVMTL:   hw resource pools: NVMTL_HWPOOL unset, leaving slot 2 NULL
+pid 2024 NVMTL: vk: GPU wait budget 5000 ms for WindowServer (WindowServer keeps 5000 - a frozen desktop is worse than a dropped frame)
+pid 2024 NVMTL: vk: WindowServer has no writable HOME (unset) - Mesa shader disk cache at /var/folders/zz/zyxvpxvq6csfxvn_n00000b000002r/C/WindowServer/nvmtl-mesa
+pid 2024 NVMTL: vk: driver opened directly: /Library/GPUBundles/xemtl/libvulkan_intel.dylib (image 267C9D7D-4082-31CA-B884-1D6FB0846943 /Library/GPUBundles/xemtl/libvulkan_intel.dylib)
+pid 2024 NVMTL: vk: NVK messages ON: its own warnings and errors land here as "nvk-reason:"
+pid 2024 NVMTL: vk: pdev 1 physical device(s) through this ICD (VkResult 0)
+pid 2024 NVMTL: vk: limits — image array layers 2048, shared memory 49152 B, workgroup 1024x1024x1024 (1024 invocations), SMs 0
+pid 2024 NVMTL: vk: par3 VK_EXT_mutable_descriptor_type present — texture buffers ON (mutable texture/storage bands)
+pid 2024 NVMTL: vk: VK_EXT_image_drm_format_modifier present - a buffer texture's row pitch is the app's own bytesPerRow (explicit DRM linear layout)
+pid 2024 NVMTL: vk: VK_EXT_memory_budget present — VRAM budget is MEASURED
+pid 2024 NVMTL: vk: VK_EXT_extended_dynamic_state3 present · VK_EXT_depth_clip_enable present
+pid 2024 NVMTL: vk: vertex step rates ON (binding divisors)
+pid 2024 NVMTL: vk: cooperative matrix 0, half arithmetic 1, storage16 1/1, Vulkan memory model 1/1, tiles 0x0
+pid 2024 NVMTL: vk: integer atomic64 buffer 1, shared 0
+pid 2024 NVMTL: vk: par1 shaderOutputLayer 1, shaderOutputViewportIndex 1
+pid 2024 NVMTL: vk: descriptor indexing present - bindless textures ON (set 2)
+pid 2024 NVMTL: vk: robustBufferAccess ON (out-of-range buffer reads return zeros)
+pid 2024 NVMTL: vk: sampler anisotropy 1 (max 16), mirror-clamp-to-edge 1
+pid 2024 NVMTL: vk: sel1 wideLines AVAILABLE (range 0..8)
+pid 2024 NVMTL: vk: par2 dualSrcBlend AVAILABLE
+pid 2024 NVMTL: vk: alphaToCoverage always, alphaToOne AVAILABLE
+pid 2024 NVMTL: vk: tessellation AVAILABLE, vertex-stage stores on
+pid 2024 NVMTL: vk: sample locations backend 0; Metal capability pending native qualification
+pid 2024 NVMTL: vk: ray tracing AVAILABLE (acceleration structures + ray queries on NVK's software BVH)
+pid 2024 NVMTL: vk: newBufferWithBytesNoCopy: imports the caller's pages (VK_EXT_external_memory_host)
+pid 2024 NVMTL: vk: G14 primitive topology is dynamic; points/lines on a triangle-class pipeline: yes
+pid 2024 NVMTL: vk: provoking vertex dynamic, first or last (Apple GL's setProvokingVertexMode:)
+pid 2024 NVMTL: vk: par1 vkCreateRenderPass2 loaded; depth resolve modes 0xf, stencil 0xd, independent 1/1
+pid 2024 NVMTL: vk: apps-dyn dynamic vertex strides (vkCmdBindVertexBuffers2): yes
+pid 2024 NVMTL: vk: UP in this Metal process — "Intel(R) Arc(tm) Graphics (MTL)" api 1.4.363, queue family 0
+pid 2024 NVMTL: maxBufferLength -> 4095 MB (NVK maxStorageBufferRange 4095 MB, 3/4 of working set 12722 MB)
+pid 2024 NVMTL: limits: -initLimits (featureProfile 10002) -> maxTextureWidth2D 16384, maxComputeTextures 128, maxComputeBuffers 31
+pid 2024 NVMTL: cache io: cache writes and touches run on nvmtl.cache-io
+pid 2024 NVMTL: library index: disk-indexed blobs reference the container bytes (no copy; NVMTL_NO_NOCOPY=1 copies)
+pid 2024 NVMTL: lazy air: 1 disk-indexed libraries hold 4 names, 0 texts decoded on first use, 0 failed
+pid 2024 NVMTL: library index: DISK hit bytes=24016 entries=4 names=4 externs=0
+pid 2024 NVMTL: library index: stored cost=184212 retained=184212 entries=1 weak=0
+pid 2024 NVMTL: newLibraryWithFile: /System/Library/Frameworks/CoreDisplay.framework/Versions/A/Resources/default.metallib -> 4 functions
+pid 2024 NVMTL: lazy air: 1 texts decoded on first use across 1 disk-indexed libraries holding 4 names (0 failed)
+pid 2024 NVMTL: library key memo: stored 1 (24016 B default.metallib)
+pid 2024 NVMTL: translate: opened CE3278BE-F32C-313D-9A13-55679BE97AF2 /Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/libnvmtl_translate.dylib (cache tag sha256-95d77c814d1bdd28446abc4409a138e680e033fc8982f88481aed43e1fda4775-u2)
+pid 2024 NVMTL: translate: in-process AIR->SPIR-V library loaded
+pid 2024 NVMTL: spvcache: caching in /var/folders/zz/zyxvpxvq6csfxvn_n00000b000002r/C/WindowServer/nvmtl/spvcache
+pid 2024 NVMTL: library: ViewportToNDC (vertex) -> 1764 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 1 hit, 0 miss, 0 stored
+pid 2024 NVMTL: lazy air: 2 texts decoded on first use across 1 disk-indexed libraries holding 4 names (0 failed)
+pid 2024 NVMTL: library: TextureCopy (fragment) -> 3852 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 2 hit, 0 miss, 0 stored
+pid 2024 NVMTL: library: ColorFill (fragment) -> 920 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 3 hit, 0 miss, 0 stored
+pid 2024 NVMTL: lazy air: 4 texts decoded on first use across 1 disk-indexed libraries holding 4 names (0 failed)
+pid 2024 NVMTL: fc cache: HIT GPUPass 10928 B 0.6 ms [1 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "GPUPass" specialized with 2 constant(s)
+pid 2024 NVMTL: refl cache: HIT GPUPass 5258 B 0.41 ms [1 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 58 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 2024 NVMTL: refl cache: HIT ViewportToNDC 2101 B 0.26 ms [2 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: read-only metadata: preserved 3 descriptor guarantees
+pid 2024 NVMTL: G1: address table (binding 640) is a UNIFORM_BUFFER_DYNAMIC - an NVK constant bank, read with ldc (NVMTL_TABLE_SSBO=unset, scalarBlockLayout 1, translator lower_ex yes)
+pid 2024 NVMTL: align guard: ON - a misaligned binding runs the SAFE module, as Apple runs it (NVMTL_NO_ALIGN_GUARD=unset, translator reports promises)
+pid 2024 NVMTL: physical bounds: relaxed 7 allocation-relative access chains
+pid 2024 NVMTL: align guard: 1 render module(s) built SAFE - 3 access(es) rested on a promised 16-byte alignment (bindings 0x4)
+pid 2024 NVMTL: read-only metadata: preserved 3 descriptor guarantees
+pid 2024 NVMTL: physical bounds: relaxed 7 allocation-relative access chains
+pid 2024 NVMTL: read-only metadata: preserved 7 descriptor guarantees
+pid 2024 NVMTL: physical bounds: relaxed 29 allocation-relative access chains
+pid 2024 NVMTL: align guard: 2 render module(s) built SAFE - 8 access(es) rested on a promised 16-byte alignment (bindings 0, untraceable)
+pid 2024 NVMTL: read-only metadata: preserved 7 descriptor guarantees
+pid 2024 NVMTL: physical bounds: relaxed 29 allocation-relative access chains
+pid 2024 NVMTL: vk: framebuffer fetch off in WindowServer (NVMTL_FBFETCH_WS=1 opts in)
+pid 2024 NVMTL: spvcache: 41.4 MiB in 237 files (0 unreadable), under the 2048 MiB cap - nothing trimmed
+pid 2024 NVMTL: vk: placement-heap memory types: 0x3
+pid 2024 NVMTL: vk: shared-in-VRAM off - Shared stays in system RAM at every size (batch 56 default; NVMTL_SHARED_VRAM=1 opts in)
+pid 2024 NVMTL: buffer pool: block #1 mapped (32 MiB, system RAM BY DESIGN - Shared is system RAM on a discrete GPU (batch 56; NVMTL_SHARED_VRAM=1 opts in); 0 VRAM blocks, memory type 0); 0 pooled buffers live in 0 bytes of ranges
+pid 2024 NVMTL: vk: dummy images ZEROED and transitioned (sampled -> SHADER_READ_ONLY_OPTIMAL, storage -> GENERAL) — a declared-but-unbound texture now reads opaque black, not uninitialised VRAM
+pid 2024 NVMTL: vk: BINDLESS heap ready - set 2, 131072 sampled images, every slot the dummy until a texture asks for its gpuResourceID
+pid 2024 NVMTL: vk: descriptor model ready — set 0, 321 bindings (buffers 0-31, textures 32-159, samplers 160-191)
+pid 2024 NVMTL: vk: + address table at 640, storage textures 480-607 (dummy ok)
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f892700d0e0 (VkPipeline from 1764+10928 B of SPIR-V)
+pid 2024 NVMTL: newHeapWithDescriptor: 4096 bytes -> 0x6000009e4780
+pid 2024 NVMTL: newCommandQueue -> 0x600000fe5810 (NVK command pool)
+pid 2024 NVMTL: setSubmissionQueue: a queue ignored - this backend has no submission queue (said once)
+pid 2024 NVMTL: queue: GPU priority hint 0 unavailable; retaining fixed backend priority
+pid 2024 NVMTL: newDepthStencilStateWithDescriptor: -> 0x600001be79d0 (write 0, compare 7, stencil 0 f{7 0 0 0 ff ff} b{7 0 0 0 ff ff})
+pid 2024 NVMTL: lazy air: 2 disk-indexed libraries hold 165 names, 4 texts decoded on first use, 0 failed
+pid 2024 NVMTL: library index: DISK hit bytes=60700560 entries=161 names=161 externs=0
+pid 2024 NVMTL: library index: stored cost=9613980 retained=9798192 entries=2 weak=0
+pid 2024 NVMTL: vendorName -> Intel (asked by /System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore)
+pid 2024 NVMTL: recommendedMaxWorkingSetSize -> 16993 MB
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013c1e30 (nearest, clamp)
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToEdge;
+    "address_mode_t" = ClampToEdge;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Nearest;
+    "max_anisotropy" = 1;
+    "min_filter" = Nearest;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013c1570 (nearest, clamp)
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToEdge;
+    "address_mode_t" = ClampToEdge;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013c1f80 (linear, clamp)
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013c0af0 (linear, clamp)
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013c1dc0 (linear, clamp)
+pid 2024 NVMTL: newDepthStencilStateWithDescriptor: -> 0x600001bcc050 (write 0, compare 7, stencil 0 f{7 0 0 0 ff ff} b{7 0 0 0 ff ff})
+pid 2024 NVMTL: library index: DISK hit bytes=593088 entries=37 names=37 externs=0
+pid 2024 NVMTL: library index: stored cost=4799592 retained=14597784 entries=3 weak=0
+pid 2024 NVMTL: item 7: IOSurface textures private per process (copies) (NVK import ABSENT, VK_KHR_external_memory_fd present, DRM linear present, NVMTL_NO_SURFACE_SHARE=unset)
+pid 2024 NVMTL: vk: IOSurface copies go straight to the surface's pages (host import present, NVMTL_NO_SURFACE_HOST=unset)
+pid 2024 NVMTL: vk: imported the caller's pages as device memory — 16384000 bytes at 0x175806000, memory type 0
+pid 2024 NVMTL: library key memo: stored 2 (60700560 B default.metallib)
+pid 2024 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 2024 NVMTL: surface 1 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003af26f0 plane:0 -> 0x7f891670ed60 (2560x1600 fmt 80)
+pid 2024 NVMTL: newCommandQueue -> 0x600000ff0fd0 (NVK command pool)
+pid 2024 NVMTL: queue: GPU priority hint 0 unavailable; retaining fixed backend priority
+pid 2024 NVMTL: commit: ASYNC (default) - execution worker, submit ahead, queue capacity enforced (NVMTL_ASYNC_COMMIT=unset)
+pid 2024 NVMTL: vk: pool reuse ON (witness-guarded default) - empty command pools and address pages kept (<= 256), reused only on THE WITNESS
+pid 2024 NVMTL: vk: timing query pools recycled (keep <= 256, NVMTL_TSPOOL_KEEP=unset) - one mapped allocation per pool, not per command buffer
+pid 2024 NVMTL: residency (res2): LRU page-off/page-on ON (NVMTL_NO_RES2=unset) - cold 600 ticks, hot 120 ticks, margin 256 MB
+pid 2024 NVMTL: G14 census: render target 2560x1600 iosurface=1 (first time in this process)
+pid 2024 NVMTL: encoder: dontcare pass shape — colour0 load action 0, depth absent action 2, stencil absent action 2, load bits 0x1 (DontCare keeps, as on Apple)
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 2024 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 2024 NVMTL: physical bounds: relaxed 4 allocation-relative access chains
+pid 2024 NVMTL: fragment helpers: invocation-independent physical-buffer module guarded (374 words, bound 63, hash 43011ad8)
+pid 2024 NVMTL: align guard: 4 render module(s) built SAFE - 2 access(es) rested on a promised 16-byte alignment (bindings 0x1)
+pid 2024 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 2024 NVMTL: physical bounds: relaxed 4 allocation-relative access chains
+pid 2024 NVMTL: fragment helpers: invocation-independent physical-buffer module guarded (374 words, bound 63, hash 2c2f8f08)
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f8916932b70 (VkPipeline from 1764+920 B of SPIR-V)
+pid 2024 NVMTL: vk: apps2 pass-shape instrument LIVE (first pass: 1 colour slot(s), depth 0) — a run with no 'MRT PASS' line above therefore MEASURED that every render pass in this process had one colour slot
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: vk: G11 a Load pass began on an image resting in layout 8 (declared TRANSFER_SRC)
+pid 2024 NVMTL: static sampler: constexpr samplers bind their own state (NVMTL_NO_STATIC_SAMPLERS=unset)
+pid 2024 NVMTL: WindowServer marks: on the accelerator's 'XGDR' connection (no NVK escape in this Vulkan driver)
+pid 2024 NVMTL: WindowServer frame completion: the swap waits in NVAccel (no composite wait here)
+pid 2024 NVMTL: WindowServer surfaces: marked newest in VRAM at commit (NVAccel's page-off waits for the GPU)
+pid 2024 NVMTL: commit: G-SUB submit-ahead ON, at most 16 parts in flight (NVMTL_GSUB_INFLIGHT=unset)
+pid 2024 NVMTL: vk: pre-submit prologue ON - managed uploads and zero fills ride the submit they serve (NVMTL_PRESUBMIT_PROLOGUE=unset)
+pid 2024 NVMTL: library: SimpleColorVertex (vertex) -> 1124 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 4 hit, 0 miss, 0 stored
+pid 2024 NVMTL: library: SimpleColorFragment (fragment) -> 380 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 5 hit, 0 miss, 0 stored
+pid 2024 NVMTL: refl cache: HIT SimpleColorFragment 1092 B 0.21 ms [8 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 2024 NVMTL: physical bounds: relaxed 3 allocation-relative access chains
+pid 2024 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 2024 NVMTL: physical bounds: relaxed 3 allocation-relative access chains
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f8926705fd0 (VkPipeline from 1124+380 B of SPIR-V)
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 2024 NVMTL: commit: G-SUB 1 parts submitted ahead, peak 1 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f892670c190 (VkPipeline from 1124+380 B of SPIR-V)
+pid 2024 NVMTL: encoder: dontcare pass shape — colour0 load action 1, depth absent action 2, stencil absent action 2, load bits 0x1 (DontCare keeps, as on Apple)
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: buffer park: a dead MTLBuffer's memory is reused by the next create of its exact size and placement (NVMTL_NO_BUFREUSE=unset)
+pid 2024 NVMTL: vk: buffers (host_visible=0) take memory type 0 flags 0x7 heap 0
+pid 2024 NVMTL: zero-fill: new buffers are cleared - CPU-mapped by memset, Private by a GPU fill before the next submission (NVMTL_ZERO_FILL=unset)
+pid 2024 NVMTL: zero-fill: managed buffers clear their VRAM copy on the GPU before the next submit and their CPU copy on first CPU touch (NVMTL_MANAGED_EAGER_ZERO=unset)
+pid 2024 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7f892670cc60 VRAM
+pid 2024 NVMTL: vk: commit high-water: 2 descriptor sets = 1 draws in one command buffer (1 pools open)
+pid 2024 NVMTL: WindowServer marks: 1 composites, 0 over 50 ms, worst 17 ms; open holds 0 on 0 surface(s), most 0 on 0
+pid 2024 NVMTL: zero-fill census: 0 CPU-mapped buffers (0 bytes) cleared by memset, 1 Private (262144 bytes) by the GPU, 0 tail bytes left (length not a multiple of 4)
+pid 2024 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 2024 NVMTL: surface 2 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003ae8680 plane:0 -> 0x7f8927010000 (2560x1600 fmt 80)
+pid 2024 NVMTL: commit: G-SUB 2 parts submitted ahead, peak 1 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: commit: submit-ahead also runs at commit while the worker waits (NVMTL_COMMIT_AHEAD=unset)
+pid 2024 NVMTL: newTextureWithDescriptor: 16384x1 -> 0x7f89270108a0
+pid 2024 NVMTL: zero-fill census: 1 CPU-mapped buffers (196608 bytes) cleared by memset, 1 Private (262144 bytes) by the GPU, 0 tail bytes left (length not a multiple of 4)
+pid 2024 NVMTL: newBufferWithLength:196608 storage 0 -> 0x7f8927010bc0
+pid 2024 NVMTL: vk: pre-submit prologue census: 1 submits carried 1 managed uploads + 1 zero fills (256 KB) - each WAS its own submit; 0 prologues failed
+pid 2024 NVMTL: encoder: dontcare pass shape — colour0 load action 2, depth absent action 2, stencil absent action 2, load bits 0x0 (DontCare keeps, as on Apple)
+pid 2024 NVMTL: fc cache: HIT GPUPass 4884 B 0.5 ms [2 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "GPUPass" specialized with 2 constant(s)
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f8916711200 (VkPipeline from 1764+4884 B of SPIR-V)
+pid 2024 NVMTL: vk: bindless-all - textures reach shaders as heap slots in the per-draw table (first slot 1)
+pid 2024 NVMTL: vk: bindless-all - textures reach shaders as heap slots in the per-draw table (first slot 2)
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013cc070 (linear, clamp)
+pid 2024 NVMTL: reflection: GPUPass has no AIR — cannot be reflected
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 2024 NVMTL: reflection: ViewportToNDC has no AIR — cannot be reflected
+pid 2024 NVMTL: align guard: 8 render module(s) built SAFE - 3 access(es) rested on a promised 16-byte alignment (bindings 0x4)
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f8916718900 (VkPipeline from 1764+7976 B of SPIR-V)
+pid 2024 NVMTL: pixel sampler variant built: ViewportToNDC / GPUPass
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013d5dc0 (linear, clamp)
+pid 2024 NVMTL: static sampler: GPUPass binds 1 constexpr sampler(s) with their own state
+pid 2024 NVMTL: vk: app samplers displaced by a shader's own sampler are put back (NVMTL_NO_SAMPLER_RESTORE=unset)
+pid 2024 NVMTL: commit: G-SUB 4 parts submitted ahead, peak 2 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 2024 NVMTL: surface 3 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003ae86d0 plane:0 -> 0x7f89270113d0 (2560x1600 fmt 80)
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000013c13b0 (linear, clamp)
+pid 2024 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 2024 NVMTL: surface 4 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003aec290 plane:0 -> 0x7f8927106fc0 (2560x1600 fmt 80)
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: commit: G-SUB 8 parts submitted ahead, peak 2 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 2024 NVMTL: surface 5 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003af26b0 plane:0 -> 0x7f8916708940 (2560x1600 fmt 80)
+pid 2024 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7f89270106a0 VRAM
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 2024 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7f892700f990
+pid 2024 NVMTL: G14 census: render target 64x64 iosurface=0 (first time in this process)
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "TimgXh_Icir"
+pid 2024 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 2024 NVMTL: fc cache: HIT fixed_frag_lph_cph 595800 B 0.9 ms [3 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "fixed_frag_lph_cph" specialized with 59 constant(s)
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_vert_lph_spc" specializedName "VfxU10Xh"
+pid 2024 NVMTL: lazy air: 8 texts decoded on first use across 3 disk-indexed libraries holding 202 names (0 failed)
+pid 2024 NVMTL: named constants: fixed_vert_lph_spc applied 4 of 4, merged 4
+pid 2024 NVMTL: fc cache: HIT fixed_vert_lph_spc 4756 B 0.5 ms [4 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "fixed_vert_lph_spc" specialized with 4 constant(s)
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f8916938da0 (VkPipeline from 4756+595800 B of SPIR-V)
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cpf" specializedName "Xghc"
+pid 2024 NVMTL: begin_render: fullclear 5x33 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7f8927106a90 VRAM
+pid 2024 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 2024 NVMTL: named constants: fixed_frag_lph_cpf applied 25 of 25, merged 25
+pid 2024 NVMTL: fc cache: HIT fixed_frag_lph_cpf 610832 B 0.5 ms [5 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "fixed_frag_lph_cpf" specialized with 25 constant(s)
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_vert_lph_gen" specializedName "VfxXghb"
+pid 2024 NVMTL: named constants: fixed_vert_lph_gen applied 3 of 3, merged 3
+pid 2024 NVMTL: fc cache: HIT fixed_vert_lph_gen 9528 B 0.2 ms [6 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "fixed_vert_lph_gen" specialized with 3 constant(s)
+pid 2024 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 2024 NVMTL: vk: framebuffer fetch is off and a pipeline reads [[color(n)]] - those reads see the dummy image, not an unbound descriptor
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7f8916710030 (VkPipeline from 4756+595800 B of SPIR-V)
+pid 2024 NVMTL: G12 a second pipeline was bound inside one encoder (first time in this process)
+pid 2024 NVMTL: newTextureWithDescriptor: 320x64 -> 0x7f89167124e0
+pid 2024 NVMTL: G14 census: render target 320x64 iosurface=0 (first time in this process)
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "Xh"
+pid 2024 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 2024 NVMTL: fc cache: HIT fixed_frag_lph_cph 595708 B 0.4 ms [7 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "fixed_frag_lph_cph" specialized with 59 constant(s)
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_vert_lph_spc" specializedName "VfxXh"
+pid 2024 NVMTL: named constants: fixed_vert_lph_spc applied 4 of 4, merged 4
+pid 2024 NVMTL: fc cache: HIT fixed_vert_lph_spc 4368 B 0.3 ms [8 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: newFunctionWithName:constantValues: "fixed_vert_lph_spc" specialized with 4 constant(s)
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: align guard: 16 render module(s) built SAFE - 181 access(es) rested on a promised 16-byte alignment (bindings 0x2)
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: begin_render: fullclear 320x57 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 2024 NVMTL: newBufferWithLength:4096 storage 0 -> 0x7f8916944b00
+pid 2024 NVMTL: newBufferWithBytesNoCopy: IMPORTED the caller's pages (12288 bytes at 0x117412000) — zero copy
+pid 2024 NVMTL: initStandin: 12288-byte client-storage stand-in -> a no-copy buffer over the caller's pages (said once)
+pid 2024 NVMTL: buffer texture: dres R3 recycle ON
+pid 2024 NVMTL: buffer texture: 227x32 VkFormat 9 pitch 256 bound at 256 (DRM linear, align 1, size 8163, storage 0, render 0, view formats 0x0)
+pid 2024 NVMTL: buffer texture (new): 1 new, 0 recycled, 0 parked, 0 evicted
+pid 2024 NVMTL: buffer 0x7f8916945190 newTextureWithDescriptor:offset:256 bytesPerRow:256 -> 0x7f8916945310 (227x32 fmt 1 usage 0x1, storage 0)
+pid 2024 NVMTL: setResponsibleProcess: pid 2036 on a texture - per-process attribution is not kept; nothing to set (said once)
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "TimgXh_Ialp"
+pid 2024 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 2024 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7f891694ef00
+pid 2024 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "TcmaLlnXh"
+pid 2024 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: begin_render: fullclear 5x33 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 2024 NVMTL: G14 first draw of MTLPrimitiveType 1 in this process
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 2024 NVMTL: newTextureWithDescriptor: 320x64 -> 0x7f8916968240
+pid 2024 NVMTL: begin_render: fullclear 320x57 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 2024 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 2024 NVMTL: buffer texture: 80x38 VkFormat 9 pitch 128 bound at 256 (DRM linear, align 1, size 4816, storage 0, render 0, view formats 0x0)
+pid 2024 NVMTL: buffer texture (new): 2 new, 0 recycled, 0 parked, 0 evicted
+pid 2024 NVMTL: buffer 0x7f89167235d0 newTextureWithDescriptor:offset:256 bytesPerRow:128 -> 0x7f8916723750 (80x38 fmt 1 usage 0x1, storage 0)
+pid 2024 NVMTL: begin_render: fullclear 150x64 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 2024 NVMTL: newTextureWithDescriptor: 148x106 -> 0x7f8916723d40
+pid 2024 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7f8916724060
+pid 2024 NVMTL: begin_render: fullclear 57x46 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: library: downsample_4_frag_lph (fragment) -> 3124 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 6 hit, 0 miss, 0 stored
+pid 2024 NVMTL: library: downsample_blur_vert_lph (vertex) -> 1992 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 7 hit, 0 miss, 0 stored
+pid 2024 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7f891696fdf0
+pid 2024 NVMTL: library: narrow_blur_19_frag_lph (fragment) -> 4612 bytes of SPIR-V (cache hit)
+pid 2024 NVMTL: library entry: spvcache 8 hit, 0 miss, 0 stored
+pid 2024 NVMTL: G14 census: render target 148x106 iosurface=0 (first time in this process)
+pid 2024 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: align guard: 32 render module(s) built SAFE - 181 access(es) rested on a promised 16-byte alignment (bindings 0, untraceable)
+pid 2024 NVMTL: vk: host-pointer import refused — 0x109623000 (+8192) is not all writable memory; that buffer is COPIED
+pid 2024 NVMTL: newBufferWithBytesNoCopy: COPIED 8192 bytes at 0x109623000 (import alignment 4096) — resynced at every submission
+pid 2024 NVMTL: buffer texture: 30x32 VkFormat 97 pitch 256 bound at 823552 (DRM linear, align 8, size 8176, storage 0, render 0, view formats 0xff)
+pid 2024 NVMTL: buffer 0x7f891672c110 newTextureWithDescriptor:offset:0 bytesPerRow:256 -> 0x7f891672c290 (30x32 fmt 115 usage 0x1, storage 0)
+pid 2024 NVMTL: refl cache: HIT fixed_frag_lph_cph 12246 B 0.51 ms [64 hit, 0 miss, 0 stored]
+pid 2024 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 2024 NVMTL: vk: async texture upload OFF (default) (NVMTL_ASYNC_TEX_UPLOAD)
+pid 2024 NVMTL: vk: host-pointer import refused — 0x10961b000 (+16384) is not all writable memory; that buffer is COPIED
+pid 2024 NVMTL: buffer texture (new): 4 new, 0 recycled, 0 parked, 0 evicted
+pid 2024 NVMTL: buffer 0x7f8916723390 newTextureWithDescriptor:offset:0 bytesPerRow:448 -> 0x7f89167332d0 (56x28 fmt 115 usage 0x1, storage 0)
+pid 2024 NVMTL: vk: host-pointer import refused — 0x109625000 (+12288) is not all writable memory; that buffer is COPIED
+pid 2024 NVMTL: buffer 0x7f891673d750 newTextureWithDescriptor:offset:0 bytesPerRow:320 -> 0x7f891673d8d0 (38x26 fmt 115 usage 0x1, storage 0)
+pid 2024 NVMTL: buffer 0x7f891673dbf0 newTextureWithDescriptor:offset:256 bytesPerRow:128 -> 0x7f891673dd70 (74x32 fmt 1 usage 0x1, storage 0)
+pid 2024 NVMTL: begin_render: fullclear 64x40 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: begin_render: fullclear 64x62 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 2024 NVMTL: G14 census: render target 436x200 iosurface=0 (first time in this process)
+pid 2024 NVMTL: vk: host-pointer import refused — 0x179686000 (+66355200) is not all writable memory; that buffer is COPIED
+pid 2024 NVMTL: vk: buffers (host_visible=1) take memory type 0 flags 0x7 heap 0
+pid 2024 NVMTL: buffer 0x7f89167457e0 newTextureWithDescriptor:offset:0 bytesPerRow:30720 -> 0x7f8916974620 (3840x2160 fmt 110 usage 0x1, storage 0)
+pid 2024 NVMTL: self-sampled target 2560x1600 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: buffer texture (new): 8 new, 0 recycled, 0 parked, 0 evicted
+pid 2024 NVMTL: buffer 0x7f89169916e0 newTextureWithDescriptor:offset:0 bytesPerRow:2048 -> 0x7f8916991860 (256x1 fmt 115 usage 0x1, storage 0)
+pid 2024 NVMTL: self-sampled target 64x64 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: lazy air: 16 texts decoded on first use across 3 disk-indexed libraries holding 202 names (0 failed)
+pid 2024 NVMTL: self-sampled target 436x200 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: self-sampled target 64x64 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: G14 census: render target 460x228 iosurface=0 (first time in this process)
+pid 2024 NVMTL: G14 census: render target 468x228 iosurface=0 (first time in this process)
+pid 2024 NVMTL: self-sampled target 468x228 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: align guard: 64 render module(s) built SAFE - 181 access(es) rested on a promised 16-byte alignment (bindings 0, untraceable)
+pid 2024 NVMTL: self-sampled target 64x64 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: self-sampled target 64x64 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: self-sampled target 64x64 fmt 80: later passes read a copy taken before the pass
+pid 2024 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7f8916979d50 VRAM
+pid 2024 NVMTL: G14 census: render target 496x64 iosurface=0 (first time in this process)
+pid 2024 NVMTL: vk: commit high-water: 165 descriptor sets = 82 draws in one command buffer (1 pools open)
+pid 2024 NVMTL: WindowServer frame: 109 ms = commit->GPU start 85 ms + GPU 22 ms + GPU end->done 0 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer frames (5 s): 14, avg 16.3 ms (max 109.0) = commit->GPU 10.9 (max 85.6) + GPU 4.7 (max 22.7) + end->done 0.6 (max 5.4) ms; 1.0 parts each; 0 without GPU timing
+pid 2024 NVMTL: WindowServer marks: composite released 109 ms after its commit, surfaces 
+pid 2024 NVMTL: WindowServer marks: 14 composites, 1 over 50 ms, worst 109 ms; open holds 1 on 1 surface(s), most 1 on 0x3
+pid 2024 NVMTL: WindowServer frame: 107 ms = commit->GPU start 80 ms + GPU 2 ms + GPU end->done 24 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer marks: composite released 107 ms after its commit, surfaces 
+pid 2024 NVMTL: commit: G-SUB 16 parts submitted ahead, peak 3 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: WindowServer frame: 66 ms = commit->GPU start 59 ms + GPU 6 ms + GPU end->done 0 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer marks: composite released 66 ms after its commit, surfaces 
+pid 2024 NVMTL: WindowServer frame: 55 ms = commit->GPU start 44 ms + GPU 3 ms + GPU end->done 7 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer marks: composite released 55 ms after its commit, surfaces 
+pid 2024 NVMTL: commit: G-SUB 32 parts submitted ahead, peak 3 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7f891672c890 VRAM
+pid 2024 NVMTL: WindowServer frame: 111 ms = commit->GPU start 1 ms + GPU 2 ms + GPU end->done 107 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer marks: composite released 111 ms after its commit, surfaces 
+pid 2024 NVMTL: WindowServer frame: 111 ms = commit->GPU start 1 ms + GPU 0 ms + GPU end->done 109 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer marks: composite released 111 ms after its commit, surfaces 
+pid 2024 NVMTL: WindowServer frame: 110 ms = commit->GPU start 1 ms + GPU 2 ms + GPU end->done 107 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer marks: composite released 110 ms after its commit, surfaces 
+pid 2024 NVMTL: WindowServer frame: 88 ms = commit->GPU start 87 ms + GPU 0 ms + GPU end->done 0 ms, 1 part(s)
+pid 2024 NVMTL: WindowServer marks: composite released 89 ms after its commit, surfaces 
+pid 2024 NVMTL: commit: G-SUB 64 parts submitted ahead, peak 3 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: WindowServer frames (5 s): 128, avg 16.4 ms (max 111.6) = commit->GPU 7.3 (max 87.3) + GPU 1.3 (max 23.8) + end->done 7.8 (max 109.5) ms; 1.0 parts each; 0 without GPU timing
+pid 2024 NVMTL: WindowServer marks: 142 composites, 8 over 50 ms, worst 111 ms; open holds 1 on 1 surface(s), most 1 on 0x2
+pid 2024 NVMTL: commit: G-SUB 128 parts submitted ahead, peak 3 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 2024 NVMTL: WindowServer frames (5 s): 98, avg 11.1 ms (max 27.1) = commit->GPU 5.7 (max 25.5) + GPU 0.4 (max 0.9) + end->done 5.0 (max 25.5) ms; 1.0 parts each; 0 without GPU timing
+pid 2024 NVMTL: WindowServer marks: 240 composites, 8 over 50 ms, worst 111 ms; open holds 2 on 2 surface(s), most 1 on 0x2
+pid 2024 NVMTL: WindowServer frames (5 s): 110, avg 10.8 ms (max 34.4) = commit->GPU 5.3 (max 33.2) + GPU 0.5 (max 6.3) + end->done 5.0 (max 23.7) ms; 1.0 parts each; 0 without GPU timing
+pid 2024 NVMTL: WindowServer marks: 350 composites, 8 over 50 ms, worst 111 ms; open holds 2 on 2 surface(s), most 1 on 0x2
+pid 2024 NVMTL: buffer texture (new): 16 new, 0 recycled, 2 parked, 0 evicted
+pid 2024 NVMTL: SPI-STUB -[NVMTLTexture didModifyData]  (call #1, zero-returned — NOT IMPLEMENTED)
+pid 2024 NVMTL: surface 7 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003ada310 plane:0 -> 0x7f89167124e0 (2560x1600 fmt 80)
+pid 2024 NVMTL: residency (res1): purge under VRAM pressure ON (NVMTL_NO_PURGE_RECLAIM=unset)
+pid 2024 NVMTL: surface 8 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003aa7e10 plane:0 -> 0x7f8916936f90 (2560x1600 fmt 80)
+pid 2024 NVMTL: WindowServer frames (5 s): 88, avg 13.2 ms (max 86.2) = commit->GPU 6.2 (max 81.5) + GPU 1.3 (max 20.3) + end->done 5.8 (max 25.8) ms; 1.0 parts each; 0 without GPU timing
+pid 2024 NVMTL: WindowServer marks: 438 composites, 10 over 50 ms, worst 111 ms; open holds 3 on 2 surface(s), most 2 on 0x2
+pid 2024 NVMTL: reflection: SimpleTextureFragment has no AIR — cannot be reflected
+pid 2024 NVMTL: reflection: SimpleVertex has no AIR — cannot be reflected
+pid 2024 NVMTL: pixel sampler variant built: SimpleVertex / SimpleTextureFragment
+pid 2024 NVMTL: lazy air: 4 disk-indexed libraries hold 2039 names, 19 texts decoded on first use, 0 failed
+pid 2024 NVMTL: library index: DISK hit bytes=18202948 entries=1837 names=1837 externs=3
+pid 2024 NVMTL: library index: stored cost=134217729 retained=14597784 entries=4 weak=1
+pid 2024 NVMTL: newLibraryWithFile: /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSImage.framework/Resources/default.metallib -> 1837 functions
+pid 2024 NVMTL: minimumLinearTextureAlignmentForPixelFormat: -> 256 (NVK asked 64, Apple's D300 ruler 256)
+pid 2024 NVMTL: sizequery: miss 160x100 fmt 109 rc 0 [0 hit, 1 miss]
+pid 2024 NVMTL: newHeapWithDescriptor: 2097152 bytes -> 0x6000009515e0
+pid 2024 NVMTL: sizequery: HIT 160x100 fmt 109 -> 327680/4096 [1 hit, 1 miss]
+pid 2024 NVMTL: heap texture: dres R1 placement ON, recycle ON
+pid 2024 NVMTL: heap texture (placed): 1 placed new, 0 recycled, 0 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 2024 NVMTL: computePipelineDescriptor: "sum_rgba_columns" linked=YES functions=0 private=0 binary=0 groups=0 maxTG=0 multWidth=1
+pid 2024 NVMTL: direct machine code: off (this GPU is not a GeForce RTX 50 series card)
+pid 2024 NVMTL: align guard: 1 compute module(s) built SAFE - a promised access could not be traced to a binding
+pid 2024 NVMTL: newComputePipelineStateWithFunction: sum_rgba_columns -> 0x7f891674a8b0 (6668 B of SPIR-V)
+pid 2024 NVMTL: air names: sum_rgba_columns — 4 argument(s), 0 struct member(s) named, 3 plain-struct member(s)
+pid 2024 NVMTL: REFL sum_rgba_columns (kernel): 4 argument(s) buffer(0)=info[3 members, 12 B] texture(0)=src texture(1)=dest sampler(0)=s
+pid 2024 NVMTL: variant cache: hit sum_rgba_columns
+pid 2024 NVMTL: align guard: 2 compute module(s) built SAFE - a promised access could not be traced to a binding
+pid 2024 NVMTL: compute pixel sampler variant built: sum_rgba_columns
+pid 2024 NVMTL: vk: storage texture 0 is declared by the shader (through 1) but nothing writable is bound there — dummy
+pid 2024 NVMTL: library key memo: stored 4 (18202948 B default.metallib)
+pid 2024 NVMTL: computePipelineDescriptor: "sum_rgba_rows" linked=YES functions=0 private=0 binary=0 groups=0 maxTG=0 multWidth=1
+pid 2024 NVMTL: newComputePipelineStateWithFunction: sum_rgba_rows -> 0x7f88a7d5b0c0 (6736 B of SPIR-V)
+pid 2024 NVMTL: air names: sum_rgba_rows — 4 argument(s), 0 struct member(s) named, 3 plain-struct member(s)
+pid 2024 NVMTL: REFL sum_rgba_rows (kernel): 4 argument(s) buffer(0)=info[3 members, 12 B] texture(0)=src texture(1)=dest sampler(0)=s
+pid 2024 NVMTL: variant cache: hit sum_rgba_rows
+pid 2024 NVMTL: align guard: 4 compute module(s) built SAFE - a promised access could not be traced to a binding
+pid 2024 NVMTL: compute pixel sampler variant built: sum_rgba_rows
+pid 2024 NVMTL: surface 20 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600003afcf20 plane:0 -> 0x7f8906709f30 (2560x1600 fmt 80)
+pid 2024 NVMTL: surface host import: 27622144-byte surface ends mid-page -> 27623424 bytes (rounded up inside its own mapping)
+pid 2024 NVMTL: surface host import: 27622144-byte surface ends mid-page -> 27623424 bytes (rounded up inside its own mapping)
+pid 2024 NVMTL: newBufferWithLength:131072 storage 1 -> 0x7f8907005c20 VRAM
+pid 2024 NVMTL: sizequery: HIT 160x100 fmt 109 -> 327680/4096 [2 hit, 1 miss]
+pid 2024 NVMTL: heap texture (recycled): 1 placed new, 1 recycled, 1 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 2024 NVMTL: sizequery: HIT 160x100 fmt 109 -> 327680/4096 [4 hit, 1 miss]
+pid 2024 NVMTL: WindowServer frames (5 s): 315, avg 5.6 ms (max 131.2) = commit->GPU 3.0 (max 111.7) + GPU 0.9 (max 19.2) + end->done 1.4 (max 52.5) ms; 1.0 parts each; 2 without GPU timing
+pid 2024 NVMTL: WindowServer marks: 744 composites, 16 over 50 ms, worst 131 ms; open holds 1 on 1 surface(s), most 1 on 0x3
+pid 2024 NVMTL: surface host import: 431424-byte surface ends mid-page -> 434176 bytes (rounded up inside its own mapping)
+pid 2024 NVMTL: buffer texture (new): 32 new, 0 recycled, 10 parked, 0 evicted
+pid 2024 NVMTL: buffer texture (new): 64 new, 0 recycled, 10 parked, 0 evicted
+pid 2024 NVMTL: buffer texture (new): 128 new, 0 recycled, 10 parked, 0 evicted
+pid 2024 NVMTL: vk: commit high-water: 380 descriptor sets = 190 draws in one command buffer (1 pools open)
+pid 2024 NVMTL: heap texture (recycled): 1 placed new, 3 recycled, 3 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 2024 NVMTL: vk: commit high-water: 386 descriptor sets = 193 draws in one command buffer (1 pools open)
+pid 2024 NVMTL: sizequery: HIT 160x100 fmt 109 -> 327680/4096 [8 hit, 1 miss]
+pid 2024 NVMTL: surface host import: 1220736-byte surface ends mid-page -> 1224704 bytes (rounded up inside its own mapping)
+pid 2024 NVMTL: reflection: UberResampleLanczosFragmentBGRA has no AIR — cannot be reflected
+pid 2024 NVMTL: reflection: SimpleVertex has no AIR — cannot be reflected
+pid 2024 NVMTL: pixel sampler variant built: SimpleVertex / UberResampleLanczosFragmentBGRA
+pid 2024 NVMTL: align guard: 128 render module(s) built SAFE - 181 access(es) rested on a promised 16-byte alignment (bindings 0x2)
+pid 2024 NVMTL: WindowServer frames (5 s): 91, avg 12.8 ms (max 119.5) = commit->GPU 8.8 (max 101.0) + GPU 3.0 (max 34.2) + end->done 1.0 (max 19.9) ms; 1.0 parts each; 0 without GPU timing
+pid 2024 NVMTL: WindowServer marks: 827 composites, 18 over 50 ms, worst 131 ms; open holds 1 on 1 surface(s), most 1 on 0x25
+pid 2024 NVMTL: buffer texture: REFUSED, bytesPerRow 176 is not a multiple of 32 B (the texture header's linear pitch unit)
+pid 2024 NVMTL: buffer newTextureWithDescriptor:offset:0 bytesPerRow:176 (44x16 fmt 80, buffer 4096 B, storage 0) -> nil (reason above)
+pid 2024 NVMTL: buffer texture: REFUSED, bytesPerRow 176 is not a multiple of 32 B (the texture header's linear pitch unit)
+pid 2024 NVMTL: buffer newTextureWithDescriptor:offset:0 bytesPerRow:176 (44x16 fmt 80, buffer 2816 B, storage 0) -> nil (reason above)
+pid 2024 NVMTL: newTiledTextureWithDescriptor: linear view refused (fmt 80 44x16 bpr 176 off 0, buffer 4096 B, usage 0x1, mips 1 samples 1 array 1 depth 1 storage 1, src storage 0) -> stand-in view also REFUSED, copied texture
+pid 2024 NVMTL: newTiledTextureWithDescriptor: linear view refused -> copied texture (44x16 bpr 176; said once)
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: buffer park (park): 1 parked, 0 reused, 0 evicted, 0 drained; 1 held, 66359296 bytes
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: vk: commit high-water: 480 descriptor sets = 240 draws in one command buffer (1 pools open)
+pid 2024 NVMTL: vk: descriptor pool 2 opened — one frame needed more than 4096 sets (2048 draws)
+pid 2024 NVMTL: WindowServer frames (5 s): 195, avg 36.2 ms (max 522.3) = commit->GPU 19.1 (max 143.4) + GPU 6.9 (max 62.3) + end->done 10.2 (max 460.7) ms; 1.0 parts each; 0 without GPU timing
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: vk: commit high-water: 496 descriptor sets = 248 draws in one command buffer (2 pools open)
+pid 2024 NVMTL: vk: commit high-water: 688 descriptor sets = 344 draws in one command buffer (2 pools open)
+pid 2024 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 594972 B 3664.5 ms [85 hit, 1 miss, 0 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: refl cache: miss fixed_frag_lph_cph 12349 B 26.21 ms [293 hit, 1 miss, 0 stored]
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 599864 B 3283.5 ms [85 hit, 2 miss, 1 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: refl cache: miss fixed_frag_lph_cph 11850 B 17.75 ms [301 hit, 2 miss, 1 stored]
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 594648 B 4443.8 ms [86 hit, 3 miss, 2 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 595876 B 2200.9 ms [89 hit, 4 miss, 3 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: refl cache: miss fixed_frag_lph_cph 10399 B 25.96 ms [307 hit, 4 miss, 3 stored]
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 594896 B 5212.2 ms [89 hit, 5 miss, 4 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 596336 B 2274.7 ms [89 hit, 6 miss, 5 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 596428 B 2495.8 ms [89 hit, 7 miss, 6 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: fc cache: miss fixed_frag_lph_cph 599788 B 4303.1 ms [89 hit, 8 miss, 7 stored]
+pid 2024 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 2024 NVMTL: refl cache: miss fixed_frag_lph_cph 11747 B 80.89 ms [307 hit, 8 miss, 7 stored]
+pid 2024 NVMTL: vk: submit census over 4096 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=2615, nvmtl_vk_image_write_region_level_layer=153, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=1328
+pid 2024 NVMTL: image accounting: VRAM images asked 201 MB, 64K-aligned 203 MB (+1 waste); system images 0 -> 0 MB; all our allocations 523 MB (BAR1 0 MB); NVK charges heap0 524 MB -> NON-IMAGE 321 MB
+pid 2024 NVMTL: image census: 4096 made, 3646 gone, 450 live; VRAM 201 MB, system memory 0 MB (0 spilled); card 24576 MB; budget 17745 MB used 524 MB (measured); MTLTexture objects 465 live, 3875 released
+pid 2024 NVMTL: vk: submit census over 8192 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=4730, nvmtl_vk_image_write_region_level_layer=153, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=3309
+pid 2024 NVMTL: buffer census: 12288 made, 11852 gone, 436 live, 533972992 bytes allocated; pool 1 blocks, 208 pooled live, 13191424 bytes in ranges
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x600005388000 (linear, clamp)   [logged 4096 times now]
+pid 2024 NVMTL: vk: pre-submit prologue census: 4096 submits carried 7940 managed uploads + 14 zero fills (135785 KB) - each WAS its own submit; 0 prologues failed
+pid 2024 NVMTL: buffer texture: 2560x1404 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 14376960, storage 0, render 1, view formats 0x7ffff)   [logged 4096 times now]
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}   [logged 4096 times now]
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x600007ab82b0 plane:0 -> 0x7f891673c190 (2560x1404 fmt 80)   [logged 4096 times now]
+pid 2024 NVMTL: buffer census: 16384 made, 15949 gone, 435 live, 533972992 bytes allocated; pool 1 blocks, 207 pooled live, 13121792 bytes in ranges
+pid 2024 NVMTL: vk: submit census over 12288 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=6838, nvmtl_vk_image_write_region_level_layer=153, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=5297
+pid 2024 NVMTL: buffer census: 20480 made, 20044 gone, 436 live, 534210560 bytes allocated; pool 1 blocks, 207 pooled live, 13121792 bytes in ranges
+pid 2024 NVMTL: image accounting: VRAM images asked 201 MB, 64K-aligned 202 MB (+1 waste); system images 0 -> 0 MB; all our allocations 522 MB (BAR1 0 MB); NVK charges heap0 524 MB -> NON-IMAGE 321 MB
+pid 2024 NVMTL: image census: 8192 made, 7742 gone, 450 live; VRAM 201 MB, system memory 0 MB (0 spilled); card 24576 MB; budget 13412 MB used 524 MB (measured); MTLTexture objects 465 live, 7983 released
+pid 2024 NVMTL: vk: submit census over 16384 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=8945, nvmtl_vk_image_write_region_level_layer=153, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=7286
+pid 2024 NVMTL: buffer census: 24576 made, 24140 gone, 436 live, 533972992 bytes allocated; pool 1 blocks, 208 pooled live, 13129984 bytes in ranges
+pid 2024 NVMTL: SPI-STUB -[NVMTLTexture didModifyData]  (call #2, zero-returned — NOT IMPLEMENTED)
+pid 2024 NVMTL: SPI-STUB -[NVMTLTexture didModifyData]  (call #3, zero-returned — NOT IMPLEMENTED)
+pid 2024 NVMTL: vk: pre-submit prologue census: 8192 submits carried 16232 managed uploads + 14 zero fills (258419 KB) - each WAS its own submit; 0 prologues failed
+pid 2024 NVMTL: newSamplerStateWithDescriptor: -> 0x6000093c0230 (linear, clamp)   [logged 8192 times now]
+pid 2024 NVMTL: buffer texture: 2560x1404 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 14376960, storage 0, render 1, view formats 0x7ffff)   [logged 8192 times now]
+pid 2024 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}   [logged 8192 times now]
+pid 2024 NVMTL: newTextureWithDescriptor:iosurface:0x60000fac43b0 plane:0 -> 0x7f892701d910 (2560x1404 fmt 80)   [logged 8192 times now]
