@@ -17,17 +17,20 @@ panel() {   # measured refresh of the active pipe, Hz
   [ -n "$k" ] && { echo "$k"; return; }
   k=$(fbprop GU605MeasuredHz16); [ -n "$k" ] && echo $(( k >> 16 )) || echo "?"
 }
-echo "time panelHz shown/s flips/s copied/s" | tee "$O"
+# the pipe refresh once before and once after (debug.xegfx_kms probes every connector: not once a second)
+P0=$(panel); echo "panel refresh before: $P0 Hz" | tee "$O"
+echo "time shown/s flips/s copied/s" | tee -a "$O"
 s0=$(ctr debug.nvaccel_iop_ok_h4); f0=$(ctr debug.nvaccel_xeflip_flips); c0=$(ctr debug.nvaccel_xeflip_copied)
 tot=0
 for i in $(seq 1 "$N"); do
   sleep 1
   s1=$(ctr debug.nvaccel_iop_ok_h4); f1=$(ctr debug.nvaccel_xeflip_flips); c1=$(ctr debug.nvaccel_xeflip_copied)
   ds=$((s1 - s0)); tot=$((tot + ds))
-  printf '%s %s %d %d %d\n' "$(date +%T)" "$(panel)" "$ds" $((f1 - f0)) $((c1 - c0)) | tee -a "$O"
+  printf '%s %d %d %d\n' "$(date +%T)" "$ds" $((f1 - f0)) $((c1 - c0)) | tee -a "$O"
   s0=$s1; f0=$f1; c0=$c1
 done
-best=$(awk 'NR > 1 {if ($3 > m) m = $3} END {print m + 0}' "$O")
+best=$(awk 'NR > 2 && $2 ~ /^[0-9]+$/ {if ($2 > m) m = $2} END {print m + 0}' "$O")
+echo "panel refresh after: $(panel) Hz" | tee -a "$O"
 echo "average $((tot / N)) frames/s shown, best second $best; mode $(fbprop XeGfxKmsMode || true)" | tee -a "$O"
 echo "== XeGfxIntelFB's VBL log (the beat WindowServer composites on)"; log show --last 10m --style compact --predicate 'process == "kernel" AND eventMessage CONTAINS "VBL:"' 2>/dev/null | tail -5 | tee -a "$O"
 echo "== WindowServer's idea of the mode"; system_profiler SPDisplaysDataType 2>/dev/null | grep -E 'Resolution|Refresh|UI Looks like|Display Type|Main Display' | tee -a "$O"
