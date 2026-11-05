@@ -42,6 +42,7 @@ sec() { echo; echo "===== $* ====="; }
   sec "panic reports (newest 3)"; for p in $(ls -t /Library/Logs/DiagnosticReports/*panic* 2>/dev/null | head -3); do echo "--- $p"; head -80 "$p"; done
   sec "crash reports WindowServer (newest 2)"; for p in $(ls -t /Library/Logs/DiagnosticReports/WindowServer* 2>/dev/null | head -2); do echo "--- $p"; head -60 "$p"; done
   sec "plugin log"; tail -300 /tmp/nvmtl.log 2>/dev/null
+  sec "plugin log, WindowServer"; for f in /tmp/nvmtl-WindowServer-*.log /private/var/folders/*/*/T/WindowServer/nvmtl.log; do [ -f "$f" ] && { echo "--- $f"; tail -400 "$f"; }; done 2>/dev/null
   sec "log folder sizes"; du -sh "$L"/* 2>/dev/null | tail -20
 } > "$F" 2>&1
 cp -R "$L" "$T/logs" 2>/dev/null; cp "$F" "$T/"

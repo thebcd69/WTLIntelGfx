@@ -106,7 +106,7 @@ jobs:
           xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework IOKit \
             userland/tools/mtlprobe.m -o out/tools/mtlprobe
           xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework QuartzCore \
-            -framework CoreImage -framework MetalPerformanceShaders -framework ImageIO -framework CoreGraphics -framework IOKit \
+            -framework CoreImage -framework MetalPerformanceShaders -framework ImageIO -framework CoreGraphics -framework IOKit -framework IOSurface \
             userland/tools/blurprobe.m -o out/tools/blurprobe
       - name: Host tests (XgFbMove relocation core, scripts)
         run: |

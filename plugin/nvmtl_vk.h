@@ -310,6 +310,8 @@ void nvmtl_vk_cmd_draw_indirect(nvk_cmdbuf *c, nvk_buffer *b, size_t off);
 void nvmtl_vk_cmd_draw_indexed_indirect(nvk_cmdbuf *c, nvk_buffer *idx, size_t idxOff, int is32, nvk_buffer *b, size_t off);
 void nvmtl_vk_cmd_dispatch_indirect(nvk_cmdbuf *c, nvk_pipeline *p, nvk_buffer *b, size_t off);
 void nvmtl_vk_cmd_barrier(nvk_cmdbuf *c);
+void nvmtl_vk_cmd_rt_barrier(nvk_cmdbuf *c);   /* GU605: memoryBarrier(renderTargets) inside a pass */
+int nvmtl_vk_self_sample_mode(void);           /* GU605: NVMTL_XE_SELF_SAMPLE 0 off, 1 snap, 2 barrier */
 void nvmtl_vk_buffer_destroy(nvk_buffer *b);
 void nvmtl_vk_image_destroy(nvk_image *i);
 // Finish any in-flight asynchronous texture upload to this image (NVMTL_ASYNC_TEX_UPLOAD) before its memory

@@ -3,7 +3,9 @@
 # screen changed. Needs stage 7 (NMXAccel) this boot; works with the desktop on the Intel GPU or not.
 #   1. blurprobe (tools/blurprobe) in a test process with the Intel plugin, once per A/B setting:
 #        base | INTEL_DEBUG=noccs | INTEL_DEBUG=nofc | INTEL_DEBUG=noccs,nofc | NVMTL_NO_FBFETCH=1 (as WindowServer)
-#        | NVMTL_NO_DIRTYONLY=1 | NVMTL_NO_PSO_SKIP=1
+#        | NVMTL_NO_DIRTYONLY=1 | NVMTL_NO_PSO_SKIP=1 | NVMTL_XE_SELF_SAMPLE=barrier (also as WindowServer)
+#        | NVMTL_XE_SELF_SAMPLE=off (as WindowServer) | NVMTL_XE_SAMPLE_GENERAL=1 (as WindowServer)
+#        | NVMTL_XE_VIBRANCY=1 (the one-line preset, as WindowServer)
 #      each prints PASS/FAIL per GPU path and writes PNGs
 #   2. what the plugin inside WindowServer logged about refused/skipped work (log show + /tmp/nvmtl.log)
 #   3. the conf file the WindowServer plugin reads, as it is now
@@ -35,9 +37,17 @@ run noccs-nofc INTEL_DEBUG=noccs,nofc
 run as-windowserver NVMTL_NO_FBFETCH=1
 run no-dirtyonly NVMTL_NO_DIRTYONLY=1
 run no-psoskip NVMTL_NO_PSO_SKIP=1
+# the self-sampled-target modes (plugin: NVMTL_XE_SELF_SAMPLE), alone and as WindowServer runs (fetch off)
+run self-barrier NVMTL_XE_SELF_SAMPLE=barrier
+run self-barrier-as-ws NVMTL_XE_SELF_SAMPLE=barrier NVMTL_NO_FBFETCH=1
+run self-off-as-ws NVMTL_XE_SELF_SAMPLE=off NVMTL_NO_FBFETCH=1
+run sample-general-as-ws NVMTL_XE_SAMPLE_GENERAL=1 NVMTL_NO_FBFETCH=1
+run preset-as-ws NVMTL_XE_VIBRANCY=1 NVMTL_NO_FBFETCH=1
+say "== verdict: ws.* tests per setting (base must FAIL, preset-as-ws must PASS for the fix to be the right one)"
+grep -H -E '^TEST ws\.' "$R"/*.txt 2>/dev/null | sed -E "s#^$R/##; s#\.txt:TEST # #" | tee -a "$S" > /dev/null
 say "== WindowServer's plugin, this boot (refused / skipped / failed work)"
 { log show --last boot --style compact --predicate 'process == "WindowServer" AND eventMessage CONTAINS "NVMTL"' 2>/dev/null
-  grep -h "NVMTL" /tmp/nvmtl.log /private/tmp/nvmtl.log 2>/dev/null; } > "$R/windowserver-nvmtl.txt"
+  grep -h "NVMTL" /tmp/nvmtl.log /tmp/nvmtl-WindowServer-*.log /private/var/folders/*/*/T/WindowServer/nvmtl.log 2>/dev/null; } > "$R/windowserver-nvmtl.txt"
 grep -iE 'refused|skipped|produced nothing|FAILED|dummy|framebuffer fetch|not ready|layout|ceiling|view' "$R/windowserver-nvmtl.txt" \
   | sed -E 's/^.*NVMTL: //' | sort | uniq -c | sort -rn | head -40 | tee -a "$S" > /dev/null
 say "== $XU/nvrm610.conf (read by the plugin at WindowServer start)"; cat "$XU/nvrm610.conf" 2>/dev/null | tee -a "$S" > /dev/null || say "(none)"
