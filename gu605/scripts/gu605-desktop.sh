@@ -63,7 +63,7 @@ klog 10m > "$R/kernel-10m.txt"; sync
 #     notice, then now unless there was input meanwhile; otherwise -> at the next logout
 #   DESKTOP_LOGGED_IN=logout                   -> at the next logout (armed now, nothing restarted; exit 10)
 #   DESKTOP_LOGGED_IN=skip                     -> stop (the old behaviour)
-idle_s() { ioreg -c IOHIDSystem -d 4 2>/dev/null | awk '/"HIDIdleTime"/ {print int($NF / 1000000000); exit}'; }
+idle_s() { ioreg -r -c IOHIDSystem -d 1 2>/dev/null | awk '/"HIDIdleTime"/ {print int($NF / 1000000000); exit}'; }
 etime_s() { awk -F'[-:]' '{ n = NF; s = $n + 60 * $(n-1); if (n >= 3) s += 3600 * $(n-2); if (n >= 4) s += 86400 * $(n-3); print s }' <<< "$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"; }
 notify() { local u=$1 msg=$2 uid; uid=$(id -u "$u" 2>/dev/null) || return 0
   launchctl asuser "$uid" sudo -u "$u" osascript -e "display notification \"$msg\" with title \"GU605\"" > /dev/null 2>&1 || true; }
