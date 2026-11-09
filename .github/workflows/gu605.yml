@@ -11,7 +11,7 @@
 name: gu605
 on:
   push:
-    branches: [gu605-mtl, gu605-display]
+    branches: [gu605-mtl, gu605-display, gu605-ddc]
   workflow_dispatch:
     inputs:
       firmware_ref:
