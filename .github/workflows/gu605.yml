@@ -1,7 +1,7 @@
 # GU605 branch (ASUS ROG Zephyrus G16 GU605MY, Meteor Lake iGPU 8086:7D55, macOS 15 Sequoia): builds the kexts, the
 # Intel Metal plugin bundle and (on an Intel runner) XeGfx.kext and Mesa ANV, packs them with the GU605 scripts and
 # publishes a prerelease gu605-<shortsha>.
-#   arm   (macos-14 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
+#   arm   (macos-15 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
 #         XeMTLDriver.bundle, mtlprobe, host tests. These kexts declare fixed KPIs; nothing reads the host's KC.
 #   intel (macos-15-intel, only with vars.GU605_INTEL_JOB=1): XeGfx.kext (its link step classifies every undefined symbol against the runner's own
 #         x86_64 kernel collection, so it must run on Intel macOS) and the userland. Hosted Intel runners are scarce;
@@ -32,9 +32,10 @@ env:
   XNU_TAG: xnu-11215.81.4                                   # macOS 15 xnu: config/*.exports for the arm job's link checks
 jobs:
   arm:
-    # macos-14 by default: during the November 2026 Actions incident macos-15 jobs were never picked up for this
-    # account while macos-14 ran. Repository variable GU605_ARM_RUNNER switches it back (e.g. macos-15).
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
+    # macos-15 by default: macos-14 images were retired (2026-11-09: "The configuration 'macos-14-arm64-us-default'
+    # is not supported"); during the early-November Actions incident macos-15 jobs were not picked up and macos-14 ran.
+    # Repository variable GU605_ARM_RUNNER overrides it (e.g. macos-26).
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-15' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -216,7 +217,7 @@ jobs:
   # Mesa ANV for the x86_64 Mac without an Intel runner: the same script on an Apple-silicon runner under Rosetta
   # (MacPorts x86_64 archives, every tool x86_64, the output checked with lipo). The pack step prefers the Intel job's.
   userland-rosetta:
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-15' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
@@ -255,7 +256,7 @@ jobs:
   pack:
     needs: [arm, intel, userland-rosetta]
     if: always() && needs.arm.result == 'success'
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-15' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
