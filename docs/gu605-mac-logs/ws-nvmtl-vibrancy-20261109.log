@@ -1,0 +1,668 @@
+pid 3189 NVMTL: NVMTLDevice +load in pid 3189 (static class, image-owned) image B930D604-69B4-35B2-B5EA-50E8E6CF4982 /Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/XeMTLDriver at 2026-11-09T14:05:13+0300
+pid 3189 NVMTL: NVMTLForward: forwarding net installed on 30 classes (was: log-then-abort on 20)
+pid 3189 NVMTL: conf: NVMTL_XE_VIBRANCY=1 preset: self-sample barrier, sample layout GENERAL 1, surface match 1, tiled pad 1
+pid 3189 NVMTL: conf: 5 knob(s) read from /Library/GPUBundles/xemtl/nvrm610.conf, 0 inherited conf knob(s) forgotten first (the environment still wins)
+pid 3189 NVMTL: GL vblank wait: -[NSCGLSurface synchronize] waits by the display's refresh period in WindowServer
+pid 3189 NVMTL: -[NVMTLDevice initWithAcceleratorPort:80947] in WindowServer
+pid 3189 NVMTL:   GPU vendor 8086 (Intel, ANV)
+pid 3189 NVMTL:   allow-listed: WindowServer
+pid 3189 NVMTL: MTLIOAccelDevice's initWithAcceleratorPort: -> 0x7ff0f8008000
+pid 3189 NVMTL:   hw resource pools: NVMTL_HWPOOL unset, leaving slot 2 NULL
+pid 3189 NVMTL: vk: GPU wait budget 5000 ms for WindowServer (WindowServer keeps 5000 - a frozen desktop is worse than a dropped frame)
+pid 3189 NVMTL: vk: WindowServer has no writable HOME (unset) - Mesa shader disk cache at /var/folders/zz/zyxvpxvq6csfxvn_n00000b000002r/C/WindowServer/nvmtl-mesa
+pid 3189 NVMTL: vk: driver opened directly: /Library/GPUBundles/xemtl/libvulkan_intel.dylib (image 267C9D7D-4082-31CA-B884-1D6FB0846943 /Library/GPUBundles/xemtl/libvulkan_intel.dylib)
+pid 3189 NVMTL: vk: NVK messages ON: its own warnings and errors land here as "nvk-reason:"
+pid 3189 NVMTL: vk: pdev 1 physical device(s) through this ICD (VkResult 0)
+pid 3189 NVMTL: vk: limits — image array layers 2048, shared memory 49152 B, workgroup 1024x1024x1024 (1024 invocations), SMs 0
+pid 3189 NVMTL: vk: par3 VK_EXT_mutable_descriptor_type present — texture buffers ON (mutable texture/storage bands)
+pid 3189 NVMTL: vk: VK_EXT_image_drm_format_modifier present - a buffer texture's row pitch is the app's own bytesPerRow (explicit DRM linear layout)
+pid 3189 NVMTL: vk: VK_EXT_memory_budget present — VRAM budget is MEASURED
+pid 3189 NVMTL: vk: VK_EXT_extended_dynamic_state3 present · VK_EXT_depth_clip_enable present
+pid 3189 NVMTL: vk: vertex step rates ON (binding divisors)
+pid 3189 NVMTL: vk: cooperative matrix 0, half arithmetic 1, storage16 1/1, Vulkan memory model 1/1, tiles 0x0
+pid 3189 NVMTL: vk: integer atomic64 buffer 1, shared 0
+pid 3189 NVMTL: vk: par1 shaderOutputLayer 1, shaderOutputViewportIndex 1
+pid 3189 NVMTL: vk: descriptor indexing present - bindless textures ON (set 2)
+pid 3189 NVMTL: vk: robustBufferAccess ON (out-of-range buffer reads return zeros)
+pid 3189 NVMTL: vk: sampler anisotropy 1 (max 16), mirror-clamp-to-edge 1
+pid 3189 NVMTL: vk: sel1 wideLines AVAILABLE (range 0..8)
+pid 3189 NVMTL: vk: par2 dualSrcBlend AVAILABLE
+pid 3189 NVMTL: vk: alphaToCoverage always, alphaToOne AVAILABLE
+pid 3189 NVMTL: vk: tessellation AVAILABLE, vertex-stage stores on
+pid 3189 NVMTL: vk: sample locations backend 0; Metal capability pending native qualification
+pid 3189 NVMTL: vk: ray tracing AVAILABLE (acceleration structures + ray queries on NVK's software BVH)
+pid 3189 NVMTL: vk: newBufferWithBytesNoCopy: imports the caller's pages (VK_EXT_external_memory_host)
+pid 3189 NVMTL: vk: G14 primitive topology is dynamic; points/lines on a triangle-class pipeline: yes
+pid 3189 NVMTL: vk: provoking vertex dynamic, first or last (Apple GL's setProvokingVertexMode:)
+pid 3189 NVMTL: vk: par1 vkCreateRenderPass2 loaded; depth resolve modes 0xf, stencil 0xd, independent 1/1
+pid 3189 NVMTL: vk: apps-dyn dynamic vertex strides (vkCmdBindVertexBuffers2): yes
+pid 3189 NVMTL: vk: UP in this Metal process — "Intel(R) Arc(tm) Graphics (MTL)" api 1.4.363, queue family 0
+pid 3189 NVMTL: maxBufferLength -> 4095 MB (NVK maxStorageBufferRange 4095 MB, 3/4 of working set 12722 MB)
+pid 3189 NVMTL: limits: -initLimits (featureProfile 10002) -> maxTextureWidth2D 16384, maxComputeTextures 128, maxComputeBuffers 31
+pid 3189 NVMTL: library key memo: hit 1 (24016 B default.metallib) - whole-library hash skipped; misses 0 stale 0 stored 0
+pid 3189 NVMTL: library index: disk-indexed blobs reference the container bytes (no copy; NVMTL_NO_NOCOPY=1 copies)
+pid 3189 NVMTL: lazy air: 1 disk-indexed libraries hold 4 names, 0 texts decoded on first use, 0 failed
+pid 3189 NVMTL: library index: DISK hit bytes=24016 entries=4 names=4 externs=0
+pid 3189 NVMTL: library index: stored cost=184212 retained=184212 entries=1 weak=0
+pid 3189 NVMTL: newLibraryWithFile: /System/Library/Frameworks/CoreDisplay.framework/Versions/A/Resources/default.metallib -> 4 functions
+pid 3189 NVMTL: lazy air: 1 texts decoded on first use across 1 disk-indexed libraries holding 4 names (0 failed)
+pid 3189 NVMTL: translate: opened CE3278BE-F32C-313D-9A13-55679BE97AF2 /Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/libnvmtl_translate.dylib (cache tag sha256-95d77c814d1bdd28446abc4409a138e680e033fc8982f88481aed43e1fda4775-u2)
+pid 3189 NVMTL: translate: in-process AIR->SPIR-V library loaded
+pid 3189 NVMTL: spvcache: caching in /var/folders/zz/zyxvpxvq6csfxvn_n00000b000002r/C/WindowServer/nvmtl/spvcache
+pid 3189 NVMTL: cache io: cache writes and touches run on nvmtl.cache-io
+pid 3189 NVMTL: library: ViewportToNDC (vertex) -> 1764 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 1 hit, 0 miss, 0 stored
+pid 3189 NVMTL: lazy air: 2 texts decoded on first use across 1 disk-indexed libraries holding 4 names (0 failed)
+pid 3189 NVMTL: library: TextureCopy (fragment) -> 3852 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 2 hit, 0 miss, 0 stored
+pid 3189 NVMTL: library: ColorFill (fragment) -> 920 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 3 hit, 0 miss, 0 stored
+pid 3189 NVMTL: lazy air: 4 texts decoded on first use across 1 disk-indexed libraries holding 4 names (0 failed)
+pid 3189 NVMTL: fc cache: HIT GPUPass 10928 B 0.8 ms [1 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "GPUPass" specialized with 2 constant(s)
+pid 3189 NVMTL: refl cache: HIT GPUPass 5258 B 0.46 ms [1 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 58 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 3189 NVMTL: refl cache: HIT ViewportToNDC 2101 B 0.30 ms [2 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: read-only metadata: preserved 3 descriptor guarantees
+pid 3189 NVMTL: G1: address table (binding 640) is a UNIFORM_BUFFER_DYNAMIC - an NVK constant bank, read with ldc (NVMTL_TABLE_SSBO=unset, scalarBlockLayout 1, translator lower_ex yes)
+pid 3189 NVMTL: align guard: ON - a misaligned binding runs the SAFE module, as Apple runs it (NVMTL_NO_ALIGN_GUARD=unset, translator reports promises)
+pid 3189 NVMTL: physical bounds: relaxed 7 allocation-relative access chains
+pid 3189 NVMTL: align guard: 1 render module(s) built SAFE - 3 access(es) rested on a promised 16-byte alignment (bindings 0x4)
+pid 3189 NVMTL: read-only metadata: preserved 3 descriptor guarantees
+pid 3189 NVMTL: physical bounds: relaxed 7 allocation-relative access chains
+pid 3189 NVMTL: read-only metadata: preserved 7 descriptor guarantees
+pid 3189 NVMTL: physical bounds: relaxed 29 allocation-relative access chains
+pid 3189 NVMTL: align guard: 2 render module(s) built SAFE - 8 access(es) rested on a promised 16-byte alignment (bindings 0, untraceable)
+pid 3189 NVMTL: read-only metadata: preserved 7 descriptor guarantees
+pid 3189 NVMTL: physical bounds: relaxed 29 allocation-relative access chains
+pid 3189 NVMTL: vk: framebuffer fetch off in WindowServer (NVMTL_FBFETCH_WS=1 opts in)
+pid 3189 NVMTL: vk: self-sampled targets: BARRIER - reads see the draws before them (NVMTL_XE_SELF_SAMPLE=barrier)
+pid 3189 NVMTL: spvcache: 46.7 MiB in 255 files (0 unreadable), under the 2048 MiB cap - nothing trimmed
+pid 3189 NVMTL: vk: placement-heap memory types: 0x3
+pid 3189 NVMTL: vk: shared-in-VRAM off - Shared stays in system RAM at every size (batch 56 default; NVMTL_SHARED_VRAM=1 opts in)
+pid 3189 NVMTL: buffer pool: block #1 mapped (32 MiB, system RAM BY DESIGN - Shared is system RAM on a discrete GPU (batch 56; NVMTL_SHARED_VRAM=1 opts in); 0 VRAM blocks, memory type 0); 0 pooled buffers live in 0 bytes of ranges
+pid 3189 NVMTL: vk: dummy images ZEROED and transitioned (sampled -> SHADER_READ_ONLY_OPTIMAL, storage -> GENERAL) — a declared-but-unbound texture now reads opaque black, not uninitialised VRAM
+pid 3189 NVMTL: vk: BINDLESS heap ready - set 2, 131072 sampled images, every slot the dummy until a texture asks for its gpuResourceID
+pid 3189 NVMTL: vk: descriptor model ready — set 0, 321 bindings (buffers 0-31, textures 32-159, samplers 160-191)
+pid 3189 NVMTL: vk: + address table at 640, storage textures 480-607 (dummy ok)
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff12550b3f0 (VkPipeline from 1764+10928 B of SPIR-V)
+pid 3189 NVMTL: newHeapWithDescriptor: 4096 bytes -> 0x600003004be0
+pid 3189 NVMTL: newCommandQueue -> 0x600003600580 (NVK command pool)
+pid 3189 NVMTL: setSubmissionQueue: a queue ignored - this backend has no submission queue (said once)
+pid 3189 NVMTL: queue: GPU priority hint 0 unavailable; retaining fixed backend priority
+pid 3189 NVMTL: newDepthStencilStateWithDescriptor: -> 0x60000221c190 (write 0, compare 7, stencil 0 f{7 0 0 0 ff ff} b{7 0 0 0 ff ff})
+pid 3189 NVMTL: library key memo: hit 2 (60700560 B default.metallib) - whole-library hash skipped; misses 0 stale 0 stored 0
+pid 3189 NVMTL: lazy air: 2 disk-indexed libraries hold 165 names, 4 texts decoded on first use, 0 failed
+pid 3189 NVMTL: library index: DISK hit bytes=60700560 entries=161 names=161 externs=0
+pid 3189 NVMTL: library index: stored cost=9613980 retained=9798192 entries=2 weak=0
+pid 3189 NVMTL: vendorName -> Intel (asked by /System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore)
+pid 3189 NVMTL: recommendedMaxWorkingSetSize -> 16993 MB
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a01490 (nearest, clamp)
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToEdge;
+    "address_mode_t" = ClampToEdge;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Nearest;
+    "max_anisotropy" = 1;
+    "min_filter" = Nearest;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a01e30 (nearest, clamp)
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToEdge;
+    "address_mode_t" = ClampToEdge;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a01a40 (linear, clamp)
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a01ea0 (linear, clamp)
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a017a0 (linear, clamp)
+pid 3189 NVMTL: newDepthStencilStateWithDescriptor: -> 0x60000220e490 (write 0, compare 7, stencil 0 f{7 0 0 0 ff ff} b{7 0 0 0 ff ff})
+pid 3189 NVMTL: library index: DISK hit bytes=593088 entries=37 names=37 externs=0
+pid 3189 NVMTL: library index: stored cost=4799592 retained=14597784 entries=3 weak=0
+pid 3189 NVMTL: item 7: IOSurface textures private per process (copies) (NVK import ABSENT, VK_KHR_external_memory_fd present, DRM linear present, NVMTL_NO_SURFACE_SHARE=unset)
+pid 3189 NVMTL: vk: IOSurface copies go straight to the surface's pages (host import present, NVMTL_NO_SURFACE_HOST=unset)
+pid 3189 NVMTL: vk: imported the caller's pages as device memory — 16384000 bytes at 0x179c39000, memory type 0
+pid 3189 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 3189 NVMTL: surface 1 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x60000030c3c0 plane:0 -> 0x7ff12470c290 (2560x1600 fmt 80)
+pid 3189 NVMTL: newCommandQueue -> 0x600003608630 (NVK command pool)
+pid 3189 NVMTL: queue: GPU priority hint 0 unavailable; retaining fixed backend priority
+pid 3189 NVMTL: commit: ASYNC (default) - execution worker, submit ahead, queue capacity enforced (NVMTL_ASYNC_COMMIT=unset)
+pid 3189 NVMTL: vk: pool reuse ON (witness-guarded default) - empty command pools and address pages kept (<= 256), reused only on THE WITNESS
+pid 3189 NVMTL: vk: timing query pools recycled (keep <= 256, NVMTL_TSPOOL_KEEP=unset) - one mapped allocation per pool, not per command buffer
+pid 3189 NVMTL: residency (res2): LRU page-off/page-on ON (NVMTL_NO_RES2=unset) - cold 600 ticks, hot 120 ticks, margin 256 MB
+pid 3189 NVMTL: G14 census: render target 2560x1600 iosurface=1 (first time in this process)
+pid 3189 NVMTL: encoder: dontcare pass shape — colour0 load action 0, depth absent action 2, stencil absent action 2, load bits 0x1 (DontCare keeps, as on Apple)
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 3189 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 3189 NVMTL: physical bounds: relaxed 4 allocation-relative access chains
+pid 3189 NVMTL: fragment helpers: invocation-independent physical-buffer module guarded (374 words, bound 63, hash 43011ad8)
+pid 3189 NVMTL: align guard: 4 render module(s) built SAFE - 2 access(es) rested on a promised 16-byte alignment (bindings 0x1)
+pid 3189 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 3189 NVMTL: physical bounds: relaxed 4 allocation-relative access chains
+pid 3189 NVMTL: fragment helpers: invocation-independent physical-buffer module guarded (374 words, bound 63, hash 2c2f8f08)
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff12470d5b0 (VkPipeline from 1764+920 B of SPIR-V)
+pid 3189 NVMTL: vk: apps2 pass-shape instrument LIVE (first pass: 1 colour slot(s), depth 0) — a run with no 'MRT PASS' line above therefore MEASURED that every render pass in this process had one colour slot
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: vk: G11 a Load pass began on an image resting in layout 8 (declared TRANSFER_SRC)
+pid 3189 NVMTL: static sampler: constexpr samplers bind their own state (NVMTL_NO_STATIC_SAMPLERS=unset)
+pid 3189 NVMTL: WindowServer marks: on the accelerator's 'XGDR' connection (no NVK escape in this Vulkan driver)
+pid 3189 NVMTL: WindowServer frame completion: the swap waits in NVAccel (no composite wait here)
+pid 3189 NVMTL: WindowServer surfaces: marked newest in VRAM at commit (NVAccel's page-off waits for the GPU)
+pid 3189 NVMTL: commit: G-SUB submit-ahead ON, at most 16 parts in flight (NVMTL_GSUB_INFLIGHT=unset)
+pid 3189 NVMTL: vk: pre-submit prologue ON - managed uploads and zero fills ride the submit they serve (NVMTL_PRESUBMIT_PROLOGUE=unset)
+pid 3189 NVMTL: library: SimpleColorVertex (vertex) -> 1124 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 4 hit, 0 miss, 0 stored
+pid 3189 NVMTL: library: SimpleColorFragment (fragment) -> 380 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 5 hit, 0 miss, 0 stored
+pid 3189 NVMTL: refl cache: HIT SimpleColorFragment 1092 B 0.23 ms [8 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 3189 NVMTL: physical bounds: relaxed 3 allocation-relative access chains
+pid 3189 NVMTL: read-only metadata: preserved 1 descriptor guarantees
+pid 3189 NVMTL: physical bounds: relaxed 3 allocation-relative access chains
+pid 3189 NVMTL: commit: G-SUB 1 parts submitted ahead, peak 1 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: vk: commit high-water: 2 descriptor sets = 1 draws in one command buffer (1 pools open)
+pid 3189 NVMTL: WindowServer marks: 1 composites, 0 over 50 ms, worst 11 ms; open holds 0 on 0 surface(s), most 0 on 0
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff125013fd0 (VkPipeline from 1124+380 B of SPIR-V)
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff125223150 (VkPipeline from 1124+380 B of SPIR-V)
+pid 3189 NVMTL: encoder: dontcare pass shape — colour0 load action 1, depth absent action 2, stencil absent action 2, load bits 0x1 (DontCare keeps, as on Apple)
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: buffer park: a dead MTLBuffer's memory is reused by the next create of its exact size and placement (NVMTL_NO_BUFREUSE=unset)
+pid 3189 NVMTL: vk: buffers (host_visible=0) take memory type 0 flags 0x7 heap 0
+pid 3189 NVMTL: zero-fill: new buffers are cleared - CPU-mapped by memset, Private by a GPU fill before the next submission (NVMTL_ZERO_FILL=unset)
+pid 3189 NVMTL: zero-fill: managed buffers clear their VRAM copy on the GPU before the next submit and their CPU copy on first CPU touch (NVMTL_MANAGED_EAGER_ZERO=unset)
+pid 3189 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7ff125223c60 VRAM
+pid 3189 NVMTL: zero-fill census: 0 CPU-mapped buffers (0 bytes) cleared by memset, 1 Private (262144 bytes) by the GPU, 0 tail bytes left (length not a multiple of 4)
+pid 3189 NVMTL: commit: G-SUB 2 parts submitted ahead, peak 1 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 3189 NVMTL: surface 2 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x600000328580 plane:0 -> 0x7ff125509930 (2560x1600 fmt 80)
+pid 3189 NVMTL: commit: submit-ahead also runs at commit while the worker waits (NVMTL_COMMIT_AHEAD=unset)
+pid 3189 NVMTL: vk: pre-submit prologue census: 1 submits carried 1 managed uploads + 1 zero fills (256 KB) - each WAS its own submit; 0 prologues failed
+pid 3189 NVMTL: newTextureWithDescriptor: 16384x1 -> 0x7ff12550c120
+pid 3189 NVMTL: zero-fill census: 1 CPU-mapped buffers (196608 bytes) cleared by memset, 1 Private (262144 bytes) by the GPU, 0 tail bytes left (length not a multiple of 4)
+pid 3189 NVMTL: newBufferWithLength:196608 storage 0 -> 0x7ff125013530
+pid 3189 NVMTL: encoder: dontcare pass shape — colour0 load action 2, depth absent action 2, stencil absent action 2, load bits 0x0 (DontCare keeps, as on Apple)
+pid 3189 NVMTL: fc cache: HIT GPUPass 4884 B 0.3 ms [2 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "GPUPass" specialized with 2 constant(s)
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff12510d320 (VkPipeline from 1764+4884 B of SPIR-V)
+pid 3189 NVMTL: vk: sampled images are described in layout GENERAL (NVMTL_XE_SAMPLE_GENERAL=1)
+pid 3189 NVMTL: vk: bindless-all - textures reach shaders as heap slots in the per-draw table (first slot 1)
+pid 3189 NVMTL: vk: bindless-all - textures reach shaders as heap slots in the per-draw table (first slot 2)
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a01570 (linear, clamp)
+pid 3189 NVMTL: reflection: GPUPass has no AIR — cannot be reflected
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 3189 NVMTL: reflection: ViewportToNDC has no AIR — cannot be reflected
+pid 3189 NVMTL: align guard: 8 render module(s) built SAFE - 3 access(es) rested on a promised 16-byte alignment (bindings 0x4)
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff125014b20 (VkPipeline from 1764+7976 B of SPIR-V)
+pid 3189 NVMTL: pixel sampler variant built: ViewportToNDC / GPUPass
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a24070 (linear, clamp)
+pid 3189 NVMTL: static sampler: GPUPass binds 1 constexpr sampler(s) with their own state
+pid 3189 NVMTL: vk: app samplers displaced by a shader's own sampler are put back (NVMTL_NO_SAMPLER_RESTORE=unset)
+pid 3189 NVMTL: commit: G-SUB 4 parts submitted ahead, peak 1 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 3189 NVMTL: surface 3 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x60000030c720 plane:0 -> 0x7ff1247114f0 (2560x1600 fmt 80)
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a01570 (linear, clamp)
+pid 3189 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 3189 NVMTL: surface 4 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x6000003043b0 plane:0 -> 0x7ff125223e00 (2560x1600 fmt 80)
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: commit: G-SUB 8 parts submitted ahead, peak 2 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: buffer texture: 2560x1600 VkFormat 44 pitch 10240 bound at 0 (DRM linear, align 4, size 16384000, storage 0, render 1, view formats 0x7ffff)
+pid 3189 NVMTL: surface 5 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x6000003188e0 plane:0 -> 0x7ff114705ed0 (2560x1600 fmt 80)
+pid 3189 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7ff114716010 VRAM
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}
+pid 3189 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7ff125226240
+pid 3189 NVMTL: G14 census: render target 64x64 iosurface=0 (first time in this process)
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "TimgXh_Icir"
+pid 3189 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 3189 NVMTL: fc cache: HIT fixed_frag_lph_cph 595800 B 0.6 ms [3 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "fixed_frag_lph_cph" specialized with 59 constant(s)
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_vert_lph_spc" specializedName "VfxU10Xh"
+pid 3189 NVMTL: lazy air: 8 texts decoded on first use across 3 disk-indexed libraries holding 202 names (0 failed)
+pid 3189 NVMTL: named constants: fixed_vert_lph_spc applied 4 of 4, merged 4
+pid 3189 NVMTL: fc cache: HIT fixed_vert_lph_spc 4756 B 0.2 ms [4 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "fixed_vert_lph_spc" specialized with 4 constant(s)
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff12522bf60 (VkPipeline from 4756+595800 B of SPIR-V)
+pid 3189 NVMTL: begin_render: fullclear 5x33 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cpf" specializedName "Xghc"
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7ff1250170c0 VRAM
+pid 3189 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 3189 NVMTL: named constants: fixed_frag_lph_cpf applied 25 of 25, merged 25
+pid 3189 NVMTL: fc cache: HIT fixed_frag_lph_cpf 610832 B 0.9 ms [5 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "fixed_frag_lph_cpf" specialized with 25 constant(s)
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_vert_lph_gen" specializedName "VfxXghb"
+pid 3189 NVMTL: named constants: fixed_vert_lph_gen applied 3 of 3, merged 3
+pid 3189 NVMTL: fc cache: HIT fixed_vert_lph_gen 9528 B 0.5 ms [6 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "fixed_vert_lph_gen" specialized with 3 constant(s)
+pid 3189 NVMTL: pipeline: rt slot 0/1 cfmt 44 blend 0 rgb(1,0,op 0) alpha(1,0,op 0) vkmask f
+pid 3189 NVMTL: vk: framebuffer fetch is off and a pipeline reads [[color(n)]] - those reads see the dummy image, not an unbound descriptor
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: newRenderPipelineStateWithDescriptor: -> 0x7ff12550dd60 (VkPipeline from 4756+595800 B of SPIR-V)
+pid 3189 NVMTL: G12 a second pipeline was bound inside one encoder (first time in this process)
+pid 3189 NVMTL: newTextureWithDescriptor: 320x64 -> 0x7ff12470b890
+pid 3189 NVMTL: G14 census: render target 320x64 iosurface=0 (first time in this process)
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "Xh"
+pid 3189 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 3189 NVMTL: fc cache: HIT fixed_frag_lph_cph 595708 B 0.9 ms [7 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "fixed_frag_lph_cph" specialized with 59 constant(s)
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_vert_lph_spc" specializedName "VfxXh"
+pid 3189 NVMTL: named constants: fixed_vert_lph_spc applied 4 of 4, merged 4
+pid 3189 NVMTL: fc cache: HIT fixed_vert_lph_spc 4368 B 0.3 ms [8 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: newFunctionWithName:constantValues: "fixed_vert_lph_spc" specialized with 4 constant(s)
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: align guard: 16 render module(s) built SAFE - 181 access(es) rested on a promised 16-byte alignment (bindings 0x2)
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: begin_render: fullclear 320x57 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 3189 NVMTL: newBufferWithLength:4096 storage 0 -> 0x7ff1247148a0
+pid 3189 NVMTL: newBufferWithBytesNoCopy: IMPORTED the caller's pages (12288 bytes at 0x11b812000) — zero copy
+pid 3189 NVMTL: initStandin: 12288-byte client-storage stand-in -> a no-copy buffer over the caller's pages (said once)
+pid 3189 NVMTL: buffer texture: dres R3 recycle ON
+pid 3189 NVMTL: buffer texture: 227x32 VkFormat 9 pitch 256 bound at 256 (DRM linear, align 1, size 8163, storage 0, render 0, view formats 0x0)
+pid 3189 NVMTL: buffer texture (new): 1 new, 0 recycled, 0 parked, 0 evicted
+pid 3189 NVMTL: buffer 0x7ff124714f30 newTextureWithDescriptor:offset:256 bytesPerRow:256 -> 0x7ff1247150d0 (227x32 fmt 1 usage 0x1, storage 0)
+pid 3189 NVMTL: setResponsibleProcess: pid 3201 on a texture - per-process attribution is not kept; nothing to set (said once)
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "TimgXh_Ialp"
+pid 3189 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 3189 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7ff1250240c0
+pid 3189 NVMTL: newFunctionWithDescriptor: "fixed_frag_lph_cph" specializedName "TcmaLlnXh"
+pid 3189 NVMTL: named constants: fixed_frag_lph_cph applied 59 of 59, merged 59
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: begin_render: fullclear 5x33 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 3189 NVMTL: G14 first draw of MTLPrimitiveType 1 in this process
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 3189 NVMTL: newTextureWithDescriptor: 320x64 -> 0x7ff125241c00
+pid 3189 NVMTL: begin_render: fullclear 320x57 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: vk: fragment module declares descriptor binding 192 — [[color(n)]] framebuffer fetch (programmable blending), a band this device's set layout does not have; built (a read that survives constant folding still stops in NVK's descriptor lowering)
+pid 3189 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 3189 NVMTL: buffer texture: 80x38 VkFormat 9 pitch 128 bound at 256 (DRM linear, align 1, size 4816, storage 0, render 0, view formats 0x0)
+pid 3189 NVMTL: buffer texture (new): 2 new, 0 recycled, 0 parked, 0 evicted
+pid 3189 NVMTL: buffer 0x7ff125034e90 newTextureWithDescriptor:offset:256 bytesPerRow:128 -> 0x7ff125035760 (80x38 fmt 1 usage 0x1, storage 0)
+pid 3189 NVMTL: begin_render: fullclear 150x64 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: vk: G11 load-action render pass variant 1 made (1 colour slot(s), colour LOAD, depth clear)
+pid 3189 NVMTL: newTextureWithDescriptor: 148x106 -> 0x7ff125244600
+pid 3189 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7ff125244920
+pid 3189 NVMTL: begin_render: fullclear 57x46 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: library: downsample_4_frag_lph (fragment) -> 3124 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 6 hit, 0 miss, 0 stored
+pid 3189 NVMTL: library: downsample_blur_vert_lph (vertex) -> 1992 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 7 hit, 0 miss, 0 stored
+pid 3189 NVMTL: newTextureWithDescriptor: 64x64 -> 0x7ff0b4d34ec0
+pid 3189 NVMTL: library: narrow_blur_19_frag_lph (fragment) -> 4612 bytes of SPIR-V (cache hit)
+pid 3189 NVMTL: library entry: spvcache 8 hit, 0 miss, 0 stored
+pid 3189 NVMTL: G14 census: render target 148x106 iosurface=0 (first time in this process)
+pid 3189 NVMTL: static sampler: fixed_frag_lph_cph binds 3 constexpr sampler(s) with their own state
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: align guard: 32 render module(s) built SAFE - 181 access(es) rested on a promised 16-byte alignment (bindings 0, untraceable)
+pid 3189 NVMTL: vk: host-pointer import refused — 0x10da57000 (+8192) is not all writable memory; that buffer is COPIED
+pid 3189 NVMTL: newBufferWithBytesNoCopy: COPIED 8192 bytes at 0x10da57000 (import alignment 4096) — resynced at every submission
+pid 3189 NVMTL: buffer texture: 30x32 VkFormat 97 pitch 256 bound at 487680 (DRM linear, align 8, size 8176, storage 0, render 0, view formats 0xff)
+pid 3189 NVMTL: buffer 0x7ff12524c3d0 newTextureWithDescriptor:offset:0 bytesPerRow:256 -> 0x7ff12524c570 (30x32 fmt 115 usage 0x1, storage 0)
+pid 3189 NVMTL: refl cache: HIT fixed_frag_lph_cph 12246 B 1.29 ms [64 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: pipeline: blend 1 rgb(1,7,op 0) alpha(1,7,op 0) vkmask f
+pid 3189 NVMTL: vk: async texture upload OFF (default) (NVMTL_ASYNC_TEX_UPLOAD)
+pid 3189 NVMTL: vk: host-pointer import refused — 0x10da4f000 (+16384) is not all writable memory; that buffer is COPIED
+pid 3189 NVMTL: buffer texture (new): 4 new, 0 recycled, 0 parked, 0 evicted
+pid 3189 NVMTL: buffer 0x7ff0b4d1df20 newTextureWithDescriptor:offset:0 bytesPerRow:448 -> 0x7ff0b4d1e0c0 (56x28 fmt 115 usage 0x1, storage 0)
+pid 3189 NVMTL: vk: host-pointer import refused — 0x10da59000 (+12288) is not all writable memory; that buffer is COPIED
+pid 3189 NVMTL: buffer 0x7ff1247286c0 newTextureWithDescriptor:offset:0 bytesPerRow:320 -> 0x7ff124728860 (38x26 fmt 115 usage 0x1, storage 0)
+pid 3189 NVMTL: buffer 0x7ff1250479f0 newTextureWithDescriptor:offset:256 bytesPerRow:128 -> 0x7ff125047e80 (74x32 fmt 1 usage 0x1, storage 0)
+pid 3189 NVMTL: begin_render: fullclear 64x40 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: begin_render: fullclear 64x62 render area — Clear attachments 0x1 are larger and were cleared WHOLE, as Apple and AMD do
+pid 3189 NVMTL: G14 census: render target 436x200 iosurface=0 (first time in this process)
+pid 3189 NVMTL: vk: host-pointer import refused — 0x17dab9000 (+66355200) is not all writable memory; that buffer is COPIED
+pid 3189 NVMTL: vk: buffers (host_visible=1) take memory type 0 flags 0x7 heap 0
+pid 3189 NVMTL: buffer 0x7ff12504f820 newTextureWithDescriptor:offset:0 bytesPerRow:30720 -> 0x7ff12504f9c0 (3840x2160 fmt 110 usage 0x1, storage 0)
+pid 3189 NVMTL: buffer texture (new): 8 new, 0 recycled, 0 parked, 0 evicted
+pid 3189 NVMTL: buffer 0x7ff12506b210 newTextureWithDescriptor:offset:0 bytesPerRow:2048 -> 0x7ff12506b3b0 (256x1 fmt 115 usage 0x1, storage 0)
+pid 3189 NVMTL: lazy air: 16 texts decoded on first use across 3 disk-indexed libraries holding 202 names (0 failed)
+pid 3189 NVMTL: G14 census: render target 474x228 iosurface=0 (first time in this process)
+pid 3189 NVMTL: G14 census: render target 482x228 iosurface=0 (first time in this process)
+pid 3189 NVMTL: align guard: 64 render module(s) built SAFE - 181 access(es) rested on a promised 16-byte alignment (bindings 0, untraceable)
+pid 3189 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7ff107004e10 VRAM
+pid 3189 NVMTL: G14 census: render target 496x64 iosurface=0 (first time in this process)
+pid 3189 NVMTL: vk: commit high-water: 165 descriptor sets = 82 draws in one command buffer (1 pools open)
+pid 3189 NVMTL: WindowServer frame: 55 ms = commit->GPU start 37 ms + GPU 17 ms + GPU end->done 0 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer frames (5 s): 14, avg 11.9 ms (max 55.5) = commit->GPU 6.9 (max 37.4) + GPU 4.4 (max 17.3) + end->done 0.7 (max 5.5) ms; 1.0 parts each; 0 without GPU timing
+pid 3189 NVMTL: WindowServer marks: composite released 55 ms after its commit, surfaces 
+pid 3189 NVMTL: WindowServer marks: 14 composites, 1 over 50 ms, worst 55 ms; open holds 2 on 2 surface(s), most 1 on 0x3
+pid 3189 NVMTL: WindowServer frame: 55 ms = commit->GPU start 33 ms + GPU 2 ms + GPU end->done 19 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer marks: composite released 55 ms after its commit, surfaces 
+pid 3189 NVMTL: commit: G-SUB 16 parts submitted ahead, peak 3 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: WindowServer frame: 113 ms = commit->GPU start 0 ms + GPU 2 ms + GPU end->done 110 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer marks: composite released 114 ms after its commit, surfaces 
+pid 3189 NVMTL: WindowServer frame: 114 ms = commit->GPU start 2 ms + GPU 0 ms + GPU end->done 111 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer marks: composite released 114 ms after its commit, surfaces 
+pid 3189 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7ff1147167c0 VRAM
+pid 3189 NVMTL: WindowServer frame: 114 ms = commit->GPU start 2 ms + GPU 2 ms + GPU end->done 109 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer marks: composite released 114 ms after its commit, surfaces 
+pid 3189 NVMTL: WindowServer frame: 104 ms = commit->GPU start 0 ms + GPU 0 ms + GPU end->done 103 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer marks: composite released 104 ms after its commit, surfaces 
+pid 3189 NVMTL: newBufferWithLength:262144 storage 1 -> 0x7ff114717020 VRAM
+pid 3189 NVMTL: WindowServer frame: 103 ms = commit->GPU start 0 ms + GPU 2 ms + GPU end->done 101 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer marks: composite released 104 ms after its commit, surfaces 
+pid 3189 NVMTL: commit: G-SUB 32 parts submitted ahead, peak 4 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: commit: G-SUB 64 parts submitted ahead, peak 4 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: WindowServer frames (5 s): 118, avg 15.0 ms (max 114.5) = commit->GPU 5.4 (max 36.8) + GPU 0.6 (max 17.2) + end->done 9.0 (max 111.7) ms; 1.0 parts each; 0 without GPU timing
+pid 3189 NVMTL: WindowServer marks: 132 composites, 7 over 50 ms, worst 114 ms; open holds 2 on 2 surface(s), most 1 on 0x5
+pid 3189 NVMTL: buffer texture (new): 16 new, 0 recycled, 1 parked, 0 evicted
+pid 3189 NVMTL: commit: G-SUB 128 parts submitted ahead, peak 4 in flight | NVK G-SUB ABSENT submits 0 acquires 0 cpuwaits 0 slotwaits 0 fifowaits 0 deferred 0 reaped 0 waits 0
+pid 3189 NVMTL: SPI-STUB -[NVMTLTexture didModifyData]  (call #1, zero-returned — NOT IMPLEMENTED)
+pid 3189 NVMTL: residency (res1): purge under VRAM pressure ON (NVMTL_NO_PURGE_RECLAIM=unset)
+pid 3189 NVMTL: WindowServer frames (5 s): 110, avg 10.6 ms (max 35.5) = commit->GPU 4.9 (max 35.1) + GPU 0.2 (max 1.9) + end->done 5.5 (max 22.4) ms; 1.0 parts each; 0 without GPU timing
+pid 3189 NVMTL: WindowServer marks: 242 composites, 7 over 50 ms, worst 114 ms; open holds 2 on 2 surface(s), most 1 on 0x3
+pid 3189 NVMTL: vk: commit high-water: 172 descriptor sets = 86 draws in one command buffer (1 pools open)
+pid 3189 NVMTL: surface 7 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x60000033c840 plane:0 -> 0x7ff12522c6f0 (2560x1600 fmt 80)
+pid 3189 NVMTL: WindowServer frame: 50 ms = commit->GPU start 33 ms + GPU 16 ms + GPU end->done 0 ms, 1 part(s)
+pid 3189 NVMTL: WindowServer marks: composite released 50 ms after its commit, surfaces 
+pid 3189 NVMTL: surface 8 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x600000310170 plane:0 -> 0x7ff107105920 (2560x1600 fmt 80)
+pid 3189 NVMTL: WindowServer frames (5 s): 214, avg 6.4 ms (max 102.7) = commit->GPU 3.2 (max 57.1) + GPU 0.4 (max 16.6) + end->done 2.9 (max 57.8) ms; 1.0 parts each; 0 without GPU timing
+pid 3189 NVMTL: WindowServer marks: 456 composites, 13 over 50 ms, worst 114 ms; open holds 0 on 0 surface(s), most 0 on 0
+pid 3189 NVMTL: commit: empty submission parts are NOT submitted (NVMTL_SKIP_EMPTY=unset)
+pid 3189 NVMTL: commit: sub1 EVFOLD ON - an event wait whose signal is already in the channel is ordered by the channel, no CPU hold (NVMTL_EVFOLD=unset)
+pid 3189 NVMTL: commit: 1 empty submission parts NOT submitted (no encoder, no resources) - each WAS a full submit + wait
+pid 3189 NVMTL: reflection: SimpleTextureFragment has no AIR — cannot be reflected
+pid 3189 NVMTL: reflection: SimpleVertex has no AIR — cannot be reflected
+pid 3189 NVMTL: pixel sampler variant built: SimpleVertex / SimpleTextureFragment
+pid 3189 NVMTL: library key memo: hit 4 (18202948 B default.metallib) - whole-library hash skipped; misses 0 stale 0 stored 0
+pid 3189 NVMTL: lazy air: 4 disk-indexed libraries hold 2039 names, 19 texts decoded on first use, 0 failed
+pid 3189 NVMTL: library index: DISK hit bytes=18202948 entries=1837 names=1837 externs=3
+pid 3189 NVMTL: library index: stored cost=134217729 retained=14597784 entries=4 weak=1
+pid 3189 NVMTL: newLibraryWithFile: /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSImage.framework/Resources/default.metallib -> 1837 functions
+pid 3189 NVMTL: minimumLinearTextureAlignmentForPixelFormat: -> 256 (NVK asked 64, Apple's D300 ruler 256)
+pid 3189 NVMTL: sizequery: miss 160x100 fmt 109 rc 0 [0 hit, 1 miss]
+pid 3189 NVMTL: newHeapWithDescriptor: 2097152 bytes -> 0x6000030323a0
+pid 3189 NVMTL: sizequery: HIT 160x100 fmt 109 -> 328960/4096 [1 hit, 1 miss]
+pid 3189 NVMTL: heap texture: dres R1 placement ON, recycle ON
+pid 3189 NVMTL: heap texture (placed): 1 placed new, 0 recycled, 0 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 3189 NVMTL: computePipelineDescriptor: "sum_rgba_columns" linked=YES functions=0 private=0 binary=0 groups=0 maxTG=0 multWidth=1
+pid 3189 NVMTL: direct machine code: off (this GPU is not a GeForce RTX 50 series card)
+pid 3189 NVMTL: align guard: 1 compute module(s) built SAFE - a promised access could not be traced to a binding
+pid 3189 NVMTL: newComputePipelineStateWithFunction: sum_rgba_columns -> 0x7ff1247e02c0 (6668 B of SPIR-V)
+pid 3189 NVMTL: air names: sum_rgba_columns — 4 argument(s), 0 struct member(s) named, 3 plain-struct member(s)
+pid 3189 NVMTL: REFL sum_rgba_columns (kernel): 4 argument(s) buffer(0)=info[3 members, 12 B] texture(0)=src texture(1)=dest sampler(0)=s
+pid 3189 NVMTL: variant cache: hit sum_rgba_columns
+pid 3189 NVMTL: align guard: 2 compute module(s) built SAFE - a promised access could not be traced to a binding
+pid 3189 NVMTL: compute pixel sampler variant built: sum_rgba_columns
+pid 3189 NVMTL: vk: storage texture 0 is declared by the shader (through 1) but nothing writable is bound there — dummy
+pid 3189 NVMTL: computePipelineDescriptor: "sum_rgba_rows" linked=YES functions=0 private=0 binary=0 groups=0 maxTG=0 multWidth=1
+pid 3189 NVMTL: newComputePipelineStateWithFunction: sum_rgba_rows -> 0x7ff0b488e260 (6736 B of SPIR-V)
+pid 3189 NVMTL: air names: sum_rgba_rows — 4 argument(s), 0 struct member(s) named, 3 plain-struct member(s)
+pid 3189 NVMTL: REFL sum_rgba_rows (kernel): 4 argument(s) buffer(0)=info[3 members, 12 B] texture(0)=src texture(1)=dest sampler(0)=s
+pid 3189 NVMTL: variant cache: hit sum_rgba_rows
+pid 3189 NVMTL: align guard: 4 compute module(s) built SAFE - a promised access could not be traced to a binding
+pid 3189 NVMTL: compute pixel sampler variant built: sum_rgba_rows
+pid 3189 NVMTL: surface 14 2560x1600 plane 0 at +0 pitch 10240 -> an image in the surface's own pages (no copies)
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x600000324800 plane:0 -> 0x7ff1072154b0 (2560x1600 fmt 80)
+pid 3189 NVMTL: surface host import: 27622144-byte surface ends mid-page -> 27623424 bytes (rounded up inside its own mapping)
+pid 3189 NVMTL: surface host import: 27622144-byte surface ends mid-page -> 27623424 bytes (rounded up inside its own mapping)
+pid 3189 NVMTL: surface host import: 431424-byte surface ends mid-page -> 434176 bytes (rounded up inside its own mapping)
+pid 3189 NVMTL: buffer texture (new): 32 new, 0 recycled, 9 parked, 0 evicted
+pid 3189 NVMTL: sizequery: HIT 160x100 fmt 109 -> 328960/4096 [2 hit, 1 miss]
+pid 3189 NVMTL: heap texture (recycled): 1 placed new, 1 recycled, 1 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 3189 NVMTL: sizequery: HIT 160x100 fmt 109 -> 328960/4096 [4 hit, 1 miss]
+pid 3189 NVMTL: surface host import: 7760000-byte surface ends mid-page -> 7761920 bytes (rounded up inside its own mapping)
+pid 3189 NVMTL: heap texture (recycled): 1 placed new, 3 recycled, 3 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 3189 NVMTL: sizequery: HIT 160x100 fmt 109 -> 328960/4096 [8 hit, 1 miss]
+pid 3189 NVMTL: align guard: 128 render module(s) built SAFE - 2 access(es) rested on a promised 8-byte alignment (bindings 0, untraceable)
+pid 3189 NVMTL: reflection: UberResampleLanczosFragmentBGRA has no AIR — cannot be reflected
+pid 3189 NVMTL: reflection: SimpleVertex has no AIR — cannot be reflected
+pid 3189 NVMTL: pixel sampler variant built: SimpleVertex / UberResampleLanczosFragmentBGRA
+pid 3189 NVMTL: WindowServer frames (5 s): 226, avg 7.4 ms (max 84.8) = commit->GPU 3.7 (max 73.2) + GPU 1.0 (max 43.7) + end->done 2.7 (max 69.1) ms; 1.0 parts each; 1 without GPU timing
+pid 3189 NVMTL: WindowServer marks: 666 composites, 20 over 50 ms, worst 114 ms; open holds 0 on 0 surface(s), most 0 on 0
+pid 3189 NVMTL: vk: commit high-water: 184 descriptor sets = 92 draws in one command buffer (1 pools open)
+pid 3189 NVMTL: buffer park (park): 1 parked, 0 reused, 0 evicted, 0 drained; 1 held, 66359296 bytes
+pid 3189 NVMTL: buffer texture (new): 64 new, 0 recycled, 20 parked, 0 evicted
+pid 3189 NVMTL: buffer texture (new): 128 new, 0 recycled, 20 parked, 0 evicted
+pid 3189 NVMTL: vk: commit high-water: 275 descriptor sets = 137 draws in one command buffer (1 pools open)
+pid 3189 NVMTL: vk: commit high-water: 360 descriptor sets = 180 draws in one command buffer (1 pools open)
+pid 3189 NVMTL: WindowServer frames (5 s): 93, avg 15.9 ms (max 177.5) = commit->GPU 11.1 (max 175.8) + GPU 3.9 (max 44.3) + end->done 0.9 (max 7.2) ms; 1.0 parts each; 0 without GPU timing
+pid 3189 NVMTL: WindowServer marks: 758 composites, 27 over 50 ms, worst 177 ms; open holds 1 on 1 surface(s), most 1 on 0x2
+pid 3189 NVMTL: WindowServer frames (5 s): 197, avg 38.4 ms (max 80.9) = commit->GPU 26.5 (max 63.5) + GPU 10.7 (max 38.6) + end->done 1.2 (max 25.5) ms; 1.0 parts each; 0 without GPU timing
+pid 3189 NVMTL: WindowServer marks: 955 composites, 90 over 50 ms, worst 177 ms; open holds 1 on 1 surface(s), most 1 on 0x1
+pid 3189 NVMTL: buffer texture: REFUSED, bytesPerRow 176 is not a multiple of 32 B (the texture header's linear pitch unit)
+pid 3189 NVMTL: buffer newTextureWithDescriptor:offset:0 bytesPerRow:176 (44x16 fmt 80, buffer 4096 B, storage 0) -> nil (reason above)
+pid 3189 NVMTL: buffer texture: REFUSED, bytesPerRow 176 is not a multiple of 32 B (the texture header's linear pitch unit)
+pid 3189 NVMTL: buffer newTextureWithDescriptor:offset:0 bytesPerRow:176 (44x16 fmt 80, buffer 2816 B, storage 0) -> nil (reason above)
+pid 3189 NVMTL: newTiledTextureWithDescriptor: linear view refused (fmt 80 44x16 bpr 176 off 0, buffer 4096 B, usage 0x1, mips 1 samples 1 array 1 depth 1 storage 1, src storage 0) -> stand-in view also REFUSED, copied texture
+pid 3189 NVMTL: newTiledTextureWithDescriptor: 44x16 bpr 176 -> padded stand-in (pitch 192) resynced at every submission: ok
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: buffer park (park): 2 parked, 0 reused, 0 evicted, 0 drained; 2 held, 74125312 bytes
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: encoder: clear-only pass (0.00 0.00 0.00 0.00)
+pid 3189 NVMTL: SPI-STUB -[NVMTLTexture didModifyData]  (call #2, zero-returned — NOT IMPLEMENTED)
+pid 3189 NVMTL: SPI-STUB -[NVMTLTexture didModifyData]  (call #3, zero-returned — NOT IMPLEMENTED)
+pid 3189 NVMTL: WindowServer frames (5 s): 487, avg 18.5 ms (max 172.1) = commit->GPU 13.3 (max 170.3) + GPU 4.6 (max 39.6) + end->done 0.6 (max 6.4) ms; 1.0 parts each; 0 without GPU timing
+pid 3189 NVMTL: refl cache: HIT SimpleVertexShadow 1541 B 0.31 ms [256 hit, 0 miss, 0 stored]
+pid 3189 NVMTL: vk: commit high-water: 381 descriptor sets = 190 draws in one command buffer (1 pools open)
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: vk: descriptor pool 2 opened — one frame needed more than 4096 sets (2048 draws)
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: vk: commit high-water: 386 descriptor sets = 193 draws in one command buffer (2 pools open)
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: buffer census: 4096 made, 3862 gone, 234 live, 298771760 bytes allocated; pool 1 blocks, 106 pooled live, 8799488 bytes in ranges
+pid 3189 NVMTL: vk: submit census over 4096 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=2840, nvmtl_vk_image_write_region_level_layer=175, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=1081
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: nvk-reason: W anv_descriptor_set.c:1200: VK_ERROR_OUT_OF_POOL_MEMORY
+pid 3189 NVMTL: newHeapWithDescriptor: 2097152 bytes -> 0x6000030c8140
+pid 3189 NVMTL: heap texture (recycled): 2 placed new, 6 recycled, 7 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 3189 NVMTL: sizequery: HIT 160x100 fmt 109 -> 328960/4096 [16 hit, 1 miss]
+pid 3189 NVMTL: fc cache: miss fixed_frag_lph_cph 600112 B 2201.8 ms [97 hit, 1 miss, 0 stored]
+pid 3189 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 3189 NVMTL: refl cache: miss fixed_frag_lph_cph 13484 B 13.34 ms [327 hit, 1 miss, 0 stored]
+pid 3189 NVMTL: heap texture (recycled): 2 placed new, 14 recycled, 15 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 3189 NVMTL: sizequery: HIT 160x100 fmt 109 -> 328960/4096 [32 hit, 1 miss]
+pid 3189 NVMTL: heap texture (recycled): 2 placed new, 30 recycled, 31 parked, 0 evicted, 0 took the legacy fresh path, 0 misfit
+pid 3189 NVMTL: sizequery: HIT 160x100 fmt 109 -> 328960/4096 [64 hit, 1 miss]
+pid 3189 NVMTL: fc cache: miss fixed_frag_lph_cph 600112 B 2650.4 ms [97 hit, 2 miss, 1 stored]
+pid 3189 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 3189 NVMTL: refl cache: miss fixed_frag_lph_cph 13484 B 25.85 ms [329 hit, 2 miss, 1 stored]
+pid 3189 NVMTL: buffer census: 8192 made, 7907 gone, 285 live, 327082624 bytes allocated; pool 1 blocks, 146 pooled live, 11863296 bytes in ranges
+pid 3189 NVMTL: image accounting: VRAM images asked 33 MB, 64K-aligned 35 MB (+1 waste); system images 0 -> 0 MB; all our allocations 338 MB (BAR1 0 MB); NVK charges heap0 339 MB -> NON-IMAGE 304 MB
+pid 3189 NVMTL: image census: 4096 made, 3818 gone, 278 live; VRAM 33 MB, system memory 0 MB (0 spilled); card 24576 MB; budget 18825 MB used 339 MB (measured); MTLTexture objects 294 live, 4552 released
+pid 3189 NVMTL: vk: submit census over 8192 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=5679, nvmtl_vk_image_write_region_level_layer=187, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=2326
+pid 3189 NVMTL: vk: pre-submit prologue census: 4096 submits carried 7468 managed uploads + 14 zero fills (165825 KB) - each WAS its own submit; 0 prologues failed
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a12990 (linear, clamp)   [logged 4096 times now]
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}   [logged 4096 times now]
+pid 3189 NVMTL: fc cache: miss fixed_frag_lph_cph 599788 B 6117.7 ms [99 hit, 3 miss, 2 stored]
+pid 3189 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 3189 NVMTL: vk: submit census over 12288 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=7877, nvmtl_vk_image_write_region_level_layer=187, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=4224
+pid 3189 NVMTL: buffer texture: 42x32 VkFormat 97 pitch 384 bound at 256 (DRM linear, align 8, size 12240, storage 0, render 0, view formats 0xff)   [logged 4096 times now]
+pid 3189 NVMTL: fc cache: miss fixed_frag_lph_cph 594816 B 3809.9 ms [99 hit, 4 miss, 3 stored]
+pid 3189 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 3189 NVMTL: refl cache: miss fixed_frag_lph_cph 11913 B 14.59 ms [335 hit, 4 miss, 3 stored]
+pid 3189 NVMTL: fc cache: miss fixed_frag_lph_cph 595140 B 7319.8 ms [99 hit, 5 miss, 4 stored]
+pid 3189 NVMTL: reflection: fixed_frag_lph_cph carried 59 function constant(s) into reflection (rc 0)
+pid 3189 NVMTL: image accounting: VRAM images asked 33 MB, 64K-aligned 35 MB (+1 waste); system images 0 -> 0 MB; all our allocations 339 MB (BAR1 0 MB); NVK charges heap0 340 MB -> NON-IMAGE 304 MB
+pid 3189 NVMTL: image census: 8192 made, 7899 gone, 293 live; VRAM 33 MB, system memory 0 MB (0 spilled); card 24576 MB; budget 13472 MB used 340 MB (measured); MTLTexture objects 309 live, 8867 released
+pid 3189 NVMTL: buffer census: 20480 made, 20124 gone, 356 live, 341084128 bytes allocated; pool 1 blocks, 188 pooled live, 12387584 bytes in ranges
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x60000c3282e0 plane:0 -> 0x7ff1250f7610 (2560x1404 fmt 80)   [logged 4096 times now]
+pid 3189 NVMTL: vk: submit census over 16384 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=10471, nvmtl_vk_image_write_region_level_layer=187, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=5726
+pid 3189 NVMTL: vk: pre-submit prologue census: 8192 submits carried 15636 managed uploads + 14 zero fills (363586 KB) - each WAS its own submit; 0 prologues failed
+pid 3189 NVMTL: vk: submit census over 20480 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=13172, nvmtl_vk_image_write_region_level_layer=187, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=7121
+pid 3189 NVMTL: buffer census: 28672 made, 28298 gone, 374 live, 347749472 bytes allocated; pool 1 blocks, 206 pooled live, 12621056 bytes in ranges
+pid 3189 NVMTL: buffer texture: 446x2 VkFormat 16 pitch 896 bound at 0 (DRM linear, align 2, size 1788, storage 0, render 0, view formats 0x1ff)   [logged 8192 times now]
+pid 3189 NVMTL: newSamplerStateWithDescriptor: -> 0x600002a916c0 (linear, clamp)   [logged 8192 times now]
+pid 3189 NVMTL: pixel sampler: {
+    "address_mode_r" = ClampToEdge;
+    "address_mode_s" = ClampToZero;
+    "address_mode_t" = ClampToZero;
+    "border_color" = TransparentBlack;
+    "compare_function" = None;
+    coordinates = Pixel;
+    "lod_bias" = 0;
+    "lod_max_clamp" = "3.402823e+38";
+    "lod_min_clamp" = 0;
+    "mag_filter" = Linear;
+    "max_anisotropy" = 1;
+    "min_filter" = Linear;
+    "mip_filter" = None;
+    reduction = WeightedAverage;
+}   [logged 8192 times now]
+pid 3189 NVMTL: image accounting: VRAM images asked 47 MB, 64K-aligned 49 MB (+1 waste); system images 0 -> 0 MB; all our allocations 359 MB (BAR1 0 MB); NVK charges heap0 360 MB -> NON-IMAGE 310 MB
+pid 3189 NVMTL: image census: 12288 made, 11918 gone, 370 live; VRAM 47 MB, system memory 0 MB (0 spilled); card 24576 MB; budget 13404 MB used 360 MB (measured); MTLTexture objects 389 live, 13009 released
+pid 3189 NVMTL: buffer census: 32768 made, 32393 gone, 375 live, 354229984 bytes allocated; pool 1 blocks, 207 pooled live, 12653824 bytes in ranges
+pid 3189 NVMTL: vk: submit census over 24576 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=15540, nvmtl_vk_image_write_region_level_layer=187, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=8849
+pid 3189 NVMTL: buffer census: 36864 made, 36491 gone, 373 live, 332924304 bytes allocated; pool 1 blocks, 206 pooled live, 12584192 bytes in ranges
+pid 3189 NVMTL: newTextureWithDescriptor:iosurface:0x60000c328730 plane:0 -> 0x7ff12556e010 (2560x1404 fmt 80)   [logged 8192 times now]
+pid 3189 NVMTL: vk: submit census over 28672 submissions - -[NVMTLCommandBuffer(EventSubmission) nvmtlSubmitAhead]=18403, nvmtl_vk_image_write_region_level_layer=187, -[NVMTLCommandBuffer(EventSubmission) nvmtlAdvancePart]=10082
