@@ -12,6 +12,9 @@ FLIP=1
 FLIP_ASYNC=0
 WSMARK=1
 K5=1
+# DDC/CI (hardware brightness of the external monitor, BetterDisplay's DDC mode) through the Intel framebuffer:
+# 1 = on, 0 = off (applied at every boot by gu605-auto.sh; at once by hand: sudo tools/xeddcprobe enable 0)
+DDC=1
 # copy each run's summary to <EFI>/GU605/ (readable from Windows); 0 = never mount the EFI
 EFI_LOG=1
 # display path (docs/GU605-DISPLAY-DESIGN.md, branch gu605-display): adopt = keep the firmware's pipe (gu605-mtl);

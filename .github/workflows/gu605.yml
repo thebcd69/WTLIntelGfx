@@ -111,6 +111,8 @@ jobs:
             userland/tools/blurprobe.m -o out/tools/blurprobe
           xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework QuartzCore \
             -framework IOKit -framework IOSurface userland/tools/fpsprobe.m -o out/tools/fpsprobe
+          xcrun clang -O2 -arch x86_64 -mmacosx-version-min=15.0 -framework IOKit -framework CoreFoundation \
+            userland/tools/xeddcprobe.c -o out/tools/xeddcprobe
       - name: Host tests (XgFbMove relocation core, scripts)
         run: |
           set -euo pipefail
@@ -133,6 +135,7 @@ jobs:
             out/tools/mtlprobe
             out/tools/blurprobe
             out/tools/fpsprobe
+            out/tools/xeddcprobe
             out/*.log
       - name: Logs
         if: always()
@@ -272,7 +275,8 @@ jobs:
           for k in XeGfxIntelFB/XeGfxIntelFB XeGfxAccel/15/XeGfxAccel XeGfxAGDC/XeGfxAGDC XgFbMove/XgFbMove; do
             ditto "$A/kexts/$k.kext" "$P/Library/Extensions/$(basename "$k").kext"; done
           ditto "$A/plugin-gu605/XeMTLDriver.bundle" "$P/Library/GPUBundles/XeMTLDriver.bundle"
-          cp "$A/tools/mtlprobe" "$A/tools/blurprobe" "$A/tools/fpsprobe" "$P/tools/"; chmod 755 "$P/tools/mtlprobe" "$P/tools/blurprobe" "$P/tools/fpsprobe" "$P/Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/"*
+          cp "$A/tools/mtlprobe" "$A/tools/blurprobe" "$A/tools/fpsprobe" "$A/tools/xeddcprobe" "$P/tools/"
+          chmod 755 "$P/tools/mtlprobe" "$P/tools/blurprobe" "$P/tools/fpsprobe" "$P/tools/xeddcprobe" "$P/Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/"*
           find "$P/Library" -path '*/MacOS/*' -type f -exec chmod 755 {} +
           NOTE=""
           if [ -f art/xegfx-out/XeGfx.kext/Contents/MacOS/XeGfx ]; then
