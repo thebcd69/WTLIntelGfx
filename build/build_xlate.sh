@@ -4,7 +4,9 @@
 # the unpublished LIVE/xlate.exports list. Needs rustup stable (>= 1.87).
 # <wtl> project: xegfx | author: watchthelight </wtl>
 set -euo pipefail
-export PATH=$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin
+# cargo where the caller's PATH has it (macos-26 runners: not in ~/.cargo/bin), after the system tools
+CARGO_DIR=$(dirname "$(command -v cargo 2>/dev/null || echo "$HOME/.cargo/bin/cargo")")
+export PATH=$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin:$CARGO_DIR
 R=$(cd "$(dirname "$0")/.." && pwd)
 X=$R/translator
 O=${XEGFX_OUT:-$HOME/src/XeGfx-build}/xlate; mkdir -p "$O"
