@@ -289,7 +289,10 @@ NSUInteger nvmtl_air_max_tg(NVMTLFunction *fn);
 @interface NVMTLHeap () { @public NSUInteger *_fr; uint32_t _nfr, _cfr; os_unfair_lock _fl; BOOL _backed; } @end
 @interface NVMTLBuffer () { @public BOOL _subPlaced; } @end
 /* GU605: a read-only stand-in whose pitch was padded (NVMTL_XE_TILED_PAD): resynced row by row from _hostPtr */
-@interface NVMTLBuffer () { @public size_t _hostSrcPitch, _hostDstPitch, _hostRowBytes; uint32_t _hostRows; } @end
+@interface NVMTLBuffer () { @public size_t _hostSrcPitch, _hostDstPitch, _hostRowBytes; uint32_t _hostRows;
+  // GU605 NVMTL_XE_RO_ONCE / NVMTL_XE_HOSTCOPY_AHEAD: the caller's pages are not writable by this process (_hostRO), the
+  // page samples of them at the last copy (_hostSigs: one per sample position, over _hostSigLen bytes), and whether GPU work may write this copy
+  BOOL _hostRO, _gpuMayWrite; uint64_t *_hostSigs; size_t _hostSigLen; uint32_t _hostSigRot; } @end
 typedef struct { nvk_image img; uint32_t key[12]; NSUInteger off, len; } nvmtl_park_t;
 @interface NVMTLTexture () { @public BOOL _subPlaced, _parkable; uint32_t _pkey[12]; NSUInteger _pkLen; } @end
 @interface NVMTLHeap () { @public nvmtl_park_t *_pk; uint32_t _npk; } @end

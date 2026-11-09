@@ -16,6 +16,7 @@
 - (BOOL)metalAssertionsEnabled { return NO; }
 - (NSUInteger)minimumTextureBufferAlignmentForPixelFormat:(NSUInteger)a0 { return 256; }
 static void nvbt(const char *tag, int *count, int max);
+static void nvmtl_host_mark(NVMTLBuffer *b, size_t len);
 - (id)newBufferWithBytesNoCopy:(void *)a0 length:(NSUInteger)a1 options:(NSUInteger)a2 deallocator:(id)a3
 {
     const MTLStorageMode sm = (MTLStorageMode)((a2 >> MTLResourceStorageModeShift) & 0xF);
@@ -64,6 +65,7 @@ static void nvbt(const char *tag, int *count, int max);
     }
     memcpy(b->_b.map, a0, a1);
     b->_hostPtr = a0; b->_hostLen = (size_t)a1;
+    nvmtl_host_mark(b, (size_t)a1);   // GU605: read-only caller memory (NVMTL_XE_RO_ONCE)
     { static int said; if (!said++) nvlog("newBufferWithBytesNoCopy: COPIED %lu bytes at %p (import alignment %zu) \u2014 resynced at every submission",
                                           (unsigned long)a1, a0, nvmtl_vk_host_import_align()); }
     return b;

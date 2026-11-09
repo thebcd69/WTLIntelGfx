@@ -22,6 +22,7 @@
     BOOL claimed;
     NSArray<NVMTLBuffer *> *copyInputs;
     BOOL copyInputsPrepared, hasHostCopies;
+    BOOL holdCopies, heldCounted;   // <xek> NVMTL_XE_HOSTCOPY_AHEAD: a host copy earlier GPU work may write; counted once
 }
 @end
 static _Atomic unsigned gsub_inflight;
@@ -285,14 +286,22 @@ static void nvmtl_ws_mark_diag(NVMTLSurfaceHolds *holds) {
 // the GPU starts (the plugin's own work and the queue ahead), the GPU's span over all parts (device timestamps on
 // CLOCK_UPTIME_RAW), the GPU's end -> this completion. A summary every 5 s, the first 8 composites over 50 ms in full.
 static void nvmtl_ws_frame_diag(NVMTLCommandBuffer *cb, double gs, double ge, NSUInteger parts, BOOL failed) {
-    static int ws = -1; if (ws < 0) ws = getprogname() && !strcmp(getprogname(), "WindowServer");
+    // NVMTL_XE_FRAME_DIAG=1: the same summary in another process (tools/fpsprobe)
+    static int ws = -1; if (ws < 0) ws = (getprogname() && !strcmp(getprogname(), "WindowServer")) || getenv("NVMTL_XE_FRAME_DIAG");
     if (!ws || failed || !cb->_wsCommitNs) return;
-    static _Atomic uint64_t n, untimed, qSum, gSum, dSum, tSum, pSum, qMax, gMax, dMax, tMax, last;
+    static _Atomic uint64_t n, untimed, qSum, gSum, dSum, tSum, pSum, qMax, gMax, dMax, tMax, last, sSum, sMax, sN;
     static _Atomic unsigned logged;
     const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW), c = cb->_wsCommitNs;
     const uint64_t total = now > c ? (now - c) / 1000 : 0;   // us
     atomic_fetch_add(&n, 1); atomic_fetch_add(&tSum, total); atomic_fetch_add(&pSum, parts);
     for (uint64_t m = atomic_load(&tMax); total > m && !atomic_compare_exchange_weak(&tMax, &m, total); ) ;
+    // <xek> commit -> the first part's vkQueueSubmit (the plugin's share of commit->GPU): host time of the first submit
+    const uint64_t ks = cb->_legacyKernelStart > 0 ? (uint64_t)(cb->_legacyKernelStart * 1e9) : 0;
+    if (ks) {
+        const uint64_t sub = ks > c ? (ks - c) / 1000 : 0;
+        atomic_fetch_add(&sSum, sub); atomic_fetch_add(&sN, 1);
+        for (uint64_t m = atomic_load(&sMax); sub > m && !atomic_compare_exchange_weak(&sMax, &m, sub); ) ;
+    }
     uint64_t q = 0, g = 0, dn = 0;
     if (gs > 0 && ge >= gs) {
         const uint64_t a = (uint64_t)(gs * 1e9), b = (uint64_t)(ge * 1e9);
@@ -312,11 +321,25 @@ static void nvmtl_ws_frame_diag(NVMTLCommandBuffer *cb, double gs, double ge, NS
     const uint64_t ts = atomic_exchange(&tSum, 0), qs = atomic_exchange(&qSum, 0), gsu = atomic_exchange(&gSum, 0),
                    ds = atomic_exchange(&dSum, 0), ps = atomic_exchange(&pSum, 0);
     const uint64_t tm = atomic_exchange(&tMax, 0), qm = atomic_exchange(&qMax, 0), gm = atomic_exchange(&gMax, 0), dm = atomic_exchange(&dMax, 0);
+    const uint64_t ss = atomic_exchange(&sSum, 0), sm = atomic_exchange(&sMax, 0), sn = atomic_exchange(&sN, 0);
     if (!k) return;
     nvlog("WindowServer frames (5 s): %llu, avg %.1f ms (max %.1f) = commit->GPU %.1f (max %.1f) + GPU %.1f (max %.1f) + "
           "end->done %.1f (max %.1f) ms; %.1f parts each; %llu without GPU timing",
           k, ts / 1000.0 / k, tm / 1000.0, t ? qs / 1000.0 / t : 0, qm / 1000.0, t ? gsu / 1000.0 / t : 0, gm / 1000.0,
           t ? ds / 1000.0 / t : 0, dm / 1000.0, (double)ps / k, u);
+    // <xek> where commit->GPU goes: the plugin before the first vkQueueSubmit, the submit itself, the host copies
+    // refreshed for submissions (and the read-only ones NVMTL_XE_RO_ONCE skipped), the parts held for the worker, the
+    // parts the worker submitted itself (each one waited for the GPU before the next could follow it)
+    uint64_t qv[4]; nvmtl_vk_queue_submit_stats(qv);
+    const uint64_t sb = atomic_exchange(&gXeSyncBytes, 0), sns = atomic_exchange(&gXeSyncNs, 0), rk = atomic_exchange(&gXeRoSkipBytes, 0),
+                   rc = atomic_exchange(&gXeRoChanged, 0), hd = atomic_exchange(&gXeHeld, 0), wk = atomic_exchange(&gXeWorkerSubmits, 0);
+    nvlog("WindowServer submit (5 s): commit->first submit %.1f ms (max %.1f) | vkQueueSubmit %llu x %.2f ms (max %.2f), %.2f ms "
+          "before each | host copies %.1f MB in %.1f ms, read-only skipped %.1f MB (%llu changed) | parts held for the worker %llu, "
+          "worker's own submits %llu | knobs RO_ONCE %d HOSTCOPY_AHEAD %d WORKER_AHEAD %d EMPTY_TAIL %d",
+          sn ? ss / 1000.0 / sn : 0, sm / 1000.0, (unsigned long long)qv[0], qv[0] ? qv[1] / 1e6 / qv[0] : 0, qv[2] / 1e6,
+          qv[0] ? qv[3] / 1e6 / qv[0] : 0, sb / 1048576.0, sns / 1e6, rk / 1048576.0, (unsigned long long)rc,
+          (unsigned long long)hd, (unsigned long long)wk, nvmtl_xek(XEK_RO_ONCE), nvmtl_xek(XEK_HOSTCOPY_AHEAD),
+          nvmtl_xek(XEK_WORKER_AHEAD), nvmtl_xek(XEK_EMPTY_TAIL));
 }
 // The command buffer has finished (or failed): every hold it still has is released, and what was waiting is published.
 static void nvmtl_ws_mark_ready(NVMTLCommandBuffer *cb) {
@@ -612,8 +635,14 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
     // backings once, but refresh their bytes only when it actually submits.
     part->copyInputs = nvmtl_submission_copies(part->resources, NO);
     for (NVMTLBuffer *buffer in part->copyInputs) {
-        if (buffer->_hostPtr) { part->hasHostCopies = YES; break; }
+        if (!buffer->_hostPtr) continue;
+        part->hasHostCopies = YES;
+        // <xek> what the hold is for: this part's upload would overwrite a copy that earlier GPU work may still write
+        // (and copy back after it); a read-only caller's copy is never written back with NVMTL_XE_RO_ONCE
+        if (buffer->_gpuMayWrite && !(buffer->_hostRO && nvmtl_xek(XEK_RO_ONCE))) part->holdCopies = YES;
     }
+    // parts are prepared in queue order, so a later part sees what this one may write
+    for (NVMTLBuffer *buffer in nvmtl_submission_copies(part->resources, YES)) if (buffer->_hostPtr) buffer->_gpuMayWrite = YES;
     part->copyInputsPrepared = YES;
 }
 - (BOOL)nvmtlSubmitAhead {
@@ -632,7 +661,9 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
         }
         if (!part->commands.cb) return NO;
         if (!part->encoders && !part->resources.count && !part->surfaces.count && !part->scratch.count && nvmtl_skip_empty_on()) {
-            if (!nvmtl_evfold_on() || _nextSubmit + 1 >= _parts.count) return NO;
+            // <xek> NVMTL_XE_EMPTY_TAIL (NullMoth 2.7.1): an empty last part with nothing to signal is retired here too
+            if (!nvmtl_evfold_on() || (_nextSubmit + 1 >= _parts.count
+                                       && (!nvmtl_xek(XEK_EMPTY_TAIL) || part->signalEvent || part->signals.count))) return NO;
             [self nvmtlMarkScheduled];
         if (!_legacyKernelStart) _legacyKernelStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
             nvmtl_vk_cmd_abandon(&part->commands);
@@ -645,11 +676,14 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
         {
             static int hold = -1;
             if (hold < 0) { const char *e = getenv("NVMTL_GSUB_HOSTPTR_LIFT"); hold = (e && *e && *e != '0') ? 0 : 1; }
-            if (hold && part->hasHostCopies) return NO;
+            if (hold && (nvmtl_xek(XEK_HOSTCOPY_AHEAD) ? part->holdCopies : part->hasHostCopies)) {
+                if (!part->heldCounted) { part->heldCounted = YES; atomic_fetch_add(&gXeHeld, 1); }   // <xek>
+                return NO;
+            }
         }
         nvmtl_inflight *f = nvmtl_vk_inflight_new();
         if (!f) return NO;
-        for (NVMTLBuffer *buffer in part->copyInputs) nvmtl_buffer_sync_in(buffer);
+        for (NVMTLBuffer *buffer in part->copyInputs) nvmtl_buffer_sync_submit(buffer);
         [self nvmtlMarkScheduled];
         if (!_legacyKernelStart) _legacyKernelStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
         const int r = nvmtl_vk_submit_begin(&part->commands, f);
@@ -669,6 +703,7 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
     return YES;
 }
 static void nvmtl_gsub_ahead_pass1(void);
+static void nvmtl_ahead_kick(void);
 static void nvmtl_gsub_ahead_pass(void) {
     for (int round = 0; round < 64; round++) {
         const unsigned long long before = atomic_load(&gEvFold);
@@ -720,8 +755,27 @@ static void nvmtl_gsub_ahead_pass1(void) {
         else if (part->aheadFailed) result = part->aheadFailed;
         else {
             nvmtl_prepare_submission_copies(part);
-            for (NVMTLBuffer *buffer in part->copyInputs) nvmtl_buffer_sync_in(buffer);
-            result = nvmtl_vk_submit_wait(&part->commands);
+            for (NVMTLBuffer *buffer in part->copyInputs) nvmtl_buffer_sync_submit(buffer);
+            atomic_fetch_add(&gXeWorkerSubmits, 1);   // <xek>
+            nvmtl_inflight *f = nvmtl_xek(XEK_WORKER_AHEAD) ? nvmtl_vk_inflight_new() : NULL;
+            if (!f) result = nvmtl_vk_submit_wait(&part->commands);
+            else {
+                // <xek> NVMTL_XE_WORKER_AHEAD, from NullMoth 2.7.1: a worker-owned part is an ordering barrier until
+                // QueueSubmit has accepted it. Publish that progress before waiting on its fence so the ahead lane can
+                // issue later parts in the same queue.
+                result = nvmtl_vk_submit_begin(&part->commands, f);
+                if (!result) {
+                    @synchronized ([NVMTLCommandBuffer class]) {
+                        if (_nextSubmit <= _nextPart) _nextSubmit = _nextPart + 1;
+                        nvmtl_evfold_promise_part(part);
+                    }
+                    if (nvmtl_gsub_ahead_on()) nvmtl_ahead_kick();
+                    result = nvmtl_vk_submit_finish(f);
+                }
+                // Retain uncertain submission state on an error, as the ahead path does; the owning part enters
+                // quarantine on device loss.
+                if (!result) nvmtl_vk_inflight_free(f);
+            }
         }
         if (result == -2) {
             if (!nvmtl_quarantined_parts) nvmtl_quarantined_parts = [NSMutableArray new];
