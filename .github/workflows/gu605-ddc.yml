@@ -1,4 +1,4 @@
-# gu605-ddc: quick check on macos-15 (macos-14 images were retired in November 2026): builds XeGfxIntelFB.kext with
+# gu605-ddc: quick check on macos-26 (macos-14 retired, macos-15 jobs sat queued, November 2026): builds XeGfxIntelFB.kext with
 # Apple clang (-Werror, Kernel.framework headers) so ddc.inc is compiled for real. The full package stays gu605.yml.
 name: gu605-ddc quick
 on:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   intelfb:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: XeGfxIntelFB
