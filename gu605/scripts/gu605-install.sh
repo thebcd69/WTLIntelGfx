@@ -80,6 +80,7 @@ cp "$P"/scripts/gu605-*.sh "$G/"; chmod 755 "$G"/gu605-*.sh
 [ -f "$P/tools/mtlprobe" ] && install -m 755 "$P/tools/mtlprobe" "$G/tools/mtlprobe"
 [ -f "$P/tools/blurprobe" ] && install -m 755 "$P/tools/blurprobe" "$G/tools/blurprobe"
 [ -f "$P/tools/fpsprobe" ] && install -m 755 "$P/tools/fpsprobe" "$G/tools/fpsprobe"
+[ -f "$P/tools/xeddcprobe" ] && install -m 755 "$P/tools/xeddcprobe" "$G/tools/xeddcprobe"
 [ -f "$G/gu605.conf" ] || cp "$P/scripts/gu605.conf.default" "$G/gu605.conf"
 cp "$P/BUILDINFO.txt" "$G/VERSION" 2>/dev/null || true
 chown -R root:wheel "$G"

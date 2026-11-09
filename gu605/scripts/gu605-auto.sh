@@ -43,6 +43,9 @@ case "$MODE" in
   standard) LEVEL=$(conf STANDARD_LEVEL probe) ;;
   *) finish "nothing to do in $MODE mode (the iGPU driver stays off)" ;;
 esac
+# DDC/CI on the external monitor (XeGfxIntelFB, gu605-ddc): gu605.conf DDC=0 switches it off at once, every boot
+# (the kext's XeGfxDdcEnable property; no boot-arg needed). A kext without DDC answers "unsupported": nothing happens.
+if [ -x "$G/tools/xeddcprobe" ]; then say "ddc: $("$G/tools/xeddcprobe" enable "$(conf DDC 1)" 2>&1 | tail -1)"; fi
 has_bootarg -xegfxoff && finish "boot-arg -xegfxoff: XeGfx idle"
 say "level: $LEVEL"
 [ "$LEVEL" = off ] && finish "level off"
