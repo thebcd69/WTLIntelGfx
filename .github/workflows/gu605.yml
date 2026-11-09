@@ -1,7 +1,7 @@
 # GU605 branch (ASUS ROG Zephyrus G16 GU605MY, Meteor Lake iGPU 8086:7D55, macOS 15 Sequoia): builds the kexts, the
 # Intel Metal plugin bundle and (on an Intel runner) XeGfx.kext and Mesa ANV, packs them with the GU605 scripts and
 # publishes a prerelease gu605-<shortsha>.
-#   arm   (macos-15 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
+#   arm   (macos-26 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
 #         XeMTLDriver.bundle, mtlprobe, host tests. These kexts declare fixed KPIs; nothing reads the host's KC.
 #   intel (macos-15-intel, only with vars.GU605_INTEL_JOB=1): XeGfx.kext (its link step classifies every undefined symbol against the runner's own
 #         x86_64 kernel collection, so it must run on Intel macOS) and the userland. Hosted Intel runners are scarce;
@@ -32,16 +32,18 @@ env:
   XNU_TAG: xnu-11215.81.4                                   # macOS 15 xnu: config/*.exports for the arm job's link checks
 jobs:
   arm:
-    # macos-15 by default: macos-14 images were retired (2026-11-09: "The configuration 'macos-14-arm64-us-default'
-    # is not supported"); during the early-November Actions incident macos-15 jobs were not picked up and macos-14 ran.
-    # Repository variable GU605_ARM_RUNNER overrides it (e.g. macos-26).
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-15' }}
+    # macos-26 by default: macos-14 images were retired (2026-11-09: "The configuration 'macos-14-arm64-us-default'
+    # is not supported") and macos-15 jobs sat queued for this account while macos-26 ran at once (gu605-probe, run
+    # 42612821724). Everything still targets macOS 15 (-mmacosx-version-min=15.0, kexts link-checked against
+    # xnu-11215's export lists); the image has only Xcode 26 SDKs. Repository variable GU605_ARM_RUNNER overrides it.
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
         run: |
-          # the newest Xcode 16 on the image: macOS 15 SDK (the kexts target 15.0); macos-14 defaults to Xcode 15
+          # the newest Xcode 16 on the image when there is one (macOS 15 SDK); macos-26 has only Xcode 26 (its default
+          # stays): the kexts and the plugin still target 15.0
           XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$XC" ] && sudo xcode-select -s "$XC/Contents/Developer"
           sw_vers; uname -m; xcodebuild -version || true
@@ -220,7 +222,7 @@ jobs:
   # Mesa ANV for the x86_64 Mac without an Intel runner: the same script on an Apple-silicon runner under Rosetta
   # (MacPorts x86_64 archives, every tool x86_64, the output checked with lipo). The pack step prefers the Intel job's.
   userland-rosetta:
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-15' }}
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
@@ -259,7 +261,7 @@ jobs:
   pack:
     needs: [arm, intel, userland-rosetta]
     if: always() && needs.arm.result == 'success'
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-15' }}
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
