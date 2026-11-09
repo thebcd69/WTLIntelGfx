@@ -599,6 +599,7 @@ public:
                  when, i, *(const volatile uint8_t *)(p + 0x298), *(const volatile uint8_t *)(p + 0x282));
         }
     }
+    bool fKnownArm = false;   // [gu605-mac] set by registerPendingLocked when the family had registered the head itself
     unsigned registerPendingLocked(const char *why) {
         unsigned added = 0;
         for (unsigned i = 0; i < kNvMaxFB; i++) {
@@ -621,6 +622,23 @@ public:
             unsigned c = fDM->getFramebufferCount();
             fFBRegistered |= 1u << i;
             gNvHeadsRegistered = fFBRegistered;
+            if (c == b && b > 0 && b <= 16) {
+                // [gu605-mac] already known: with automatic login, apps open IOAccelDevice2 clients before the desktop step
+                // and the family registers the boot framebuffer itself (count 0 -> 1 with no found_framebuffer from us),
+                // so ours added nothing and the accelerator was never armed ("not armed", 2026-11-05 12:55, 2026-11-09
+                // 18:51). If one of the family's pipes already drives this framebuffer, it is ours: arm on it.
+                uint8_t *kdm = (uint8_t *)fDM;
+                for (unsigned k = 0; k < b; k++) {
+                    void *kp = *(void *const volatile *)(kdm + 0x88 + 8 * k);
+                    if (kp && *(IOService *const volatile *)((const uint8_t *)kp + 0x98) == fb) {
+                        ALOG("  %s: index %u -- already registered by the family (pipe %u, %p drives %s): arming on it",
+                             why, i, k, kp, fb->getName());
+                        gNvHeadsPiped |= 1u << i; fKnownArm = true; added++;
+                        break;
+                    }
+                }
+                if (fKnownArm) continue;
+            }
             if (c != b + 1) {
                 ALOG("  %s: index %u -- count went %u -> %u; the family did not add it (already known, or the cap "
                      "accel+0xcb0 = %u refused it). Stopping here so no later head takes this one's pipe number.",
@@ -677,11 +695,12 @@ public:
             if (before != 0) ALOG("  already %u -- refusing to re-run the family's sweep", before);
             else { ALOG("  re-running IOAccelDisplayMachine::start(pci) -- the family's own sweep"); fDM->start(fPCI); }
         } else {
+            fKnownArm = false;
             registerPendingLocked("sysctl");
         }
         unsigned after = fDM->getFramebufferCount();
         ALOG("  framebuffer count after = %u", after);
-        if (after > before) { onCountGrewLocked(); return true; }
+        if (after > before || fKnownArm) { fKnownArm = false; onCountGrewLocked(); return true; }
         return false;
     }
     const OSSymbol *fSymAlloc = nullptr, *fSymFree = nullptr;
