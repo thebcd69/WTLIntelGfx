@@ -45,7 +45,7 @@ static NSString *const kShaders =
     @"#include <metal_stdlib>\n"
      "using namespace metal;\n"
      "struct V { float4 p [[position]]; float2 uv; };\n"
-     "vertex V quad(uint i [[vertex_id]], constant float4 &r [[buffer(0)]]) {\n"
+     "vertex V quadvs(uint i [[vertex_id]], constant float4 &r [[buffer(0)]]) {\n"
      "  float2 q = float2((i << 1) & 2, i & 2) * 0.5; float2 c = r.xy + q * r.zw;\n"
      "  V v; v.p = float4(c * 2 - 1, 0, 1); v.uv = float2(q.x, 1 - q.y) * 2; return v; }\n"
      "fragment float4 wall(V v [[stage_in]], texture2d<float> t [[texture(0)]]) {\n"
@@ -61,7 +61,7 @@ static NSString *const kShaders =
 static id<MTLRenderPipelineState> pso(NSString *frag, BOOL blend)
 {
     MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
-    d.vertexFunction = [gLib newFunctionWithName:@"quad"];
+    d.vertexFunction = [gLib newFunctionWithName:@"quadvs"];
     d.fragmentFunction = [gLib newFunctionWithName:frag];
     d.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
     if (blend) {
