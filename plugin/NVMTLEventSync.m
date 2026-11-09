@@ -712,6 +712,24 @@ static void nvmtl_gsub_ahead_pass(void) {
     }
 }
 static void nvmtl_gsub_ahead_pass1(void) {
+    if (!nvmtl_xek(XEK_QUEUE_LEAP)) {
+        // <xek> commit order across every queue: a command buffer goes ahead only when every one committed before it
+        // (on any queue) and every one reserved before it on its own queue already has; the first that cannot stops
+        // the pass. The worker still advances each queue on its own (event waits between queues stay legal).
+        static int said; if (!said++) nvlog("commit: submit-ahead in commit order across queues (NVMTL_XE_QUEUE_LEAP=0)");
+        for (NVMTLCommandBuffer *cb in [nvmtl_pending_buffers copy]) {
+            if (cb->_executionDone || cb->_partsRetiring) continue;   // finished or finishing: nothing left to order
+            BOOL ok = YES;
+            for (NVMTLQueueReservation *r in [cb->_queue->_reservations copy]) {
+                NVMTLCommandBuffer *b = r->buffer;
+                if (!b || b->_executionDone || b->_partsRetiring) continue;
+                if (b == cb) break;
+                if (![b nvmtlSubmitAhead]) { ok = NO; break; }
+            }
+            if (!ok || ![cb nvmtlSubmitAhead]) break;
+        }
+        return;
+    }
     NSMutableSet *queues = [NSMutableSet new];
     for (NVMTLCommandBuffer *cb in nvmtl_pending_buffers) {
         id q = cb->_queue;

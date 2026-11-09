@@ -99,9 +99,17 @@ extern uint64_t (*nvmtl_res2_evict_hook)(uint64_t want);
 //                            parts go to the GPU meanwhile (NullMoth 2.7.1's AdvancePart)
 //   NVMTL_XE_EMPTY_TAIL      an empty last part with nothing to signal is retired by the ahead pass (NullMoth 2.7.1)
 // NVMTL_XE_FPS=1 sets all four (a knob set on its own wins).
-enum { XEK_RO_ONCE, XEK_HOSTCOPY_AHEAD, XEK_WORKER_AHEAD, XEK_EMPTY_TAIL, XEK_N };
-static const char *const xek_name[XEK_N] = { "NVMTL_XE_RO_ONCE", "NVMTL_XE_HOSTCOPY_AHEAD", "NVMTL_XE_WORKER_AHEAD", "NVMTL_XE_EMPTY_TAIL" };
-static _Atomic int xek_cur[XEK_N] = { -1, -1, -1, -1 };
+//   NVMTL_XE_QUEUE_LEAP      (not part of NVMTL_XE_FPS; 0 by default) 1 = the submit-ahead pass works queue by queue as
+//                            before: a later command buffer on another queue went to the GPU ahead of an earlier one
+//                            whose part was held for the worker. 0 = the pass goes in commit order across all queues and
+//                            stops at the first command buffer that cannot go ahead (2026-11-09 GU605: WindowServer's two
+//                            queues leapfrogged, an older composite landed over a newer one: windows left at their old
+//                            place, Dock and menu bar blinking; gone with xe-live 4, WindowServer waiting at each commit)
+enum { XEK_RO_ONCE, XEK_HOSTCOPY_AHEAD, XEK_WORKER_AHEAD, XEK_EMPTY_TAIL, XEK_QUEUE_LEAP, XEK_N };
+enum { XEK_FPS_N = XEK_QUEUE_LEAP };   // the knobs NVMTL_XE_FPS=1 sets
+static const char *const xek_name[XEK_N] = { "NVMTL_XE_RO_ONCE", "NVMTL_XE_HOSTCOPY_AHEAD", "NVMTL_XE_WORKER_AHEAD", "NVMTL_XE_EMPTY_TAIL",
+                                             "NVMTL_XE_QUEUE_LEAP" };
+static _Atomic int xek_cur[XEK_N] = { -1, -1, -1, -1, -1 };
 static int xek_start[XEK_N];
 static _Atomic uint64_t xek_checked;
 static struct timespec xek_mtime; static off_t xek_size = -1;
@@ -136,8 +144,8 @@ static int nvmtl_xek(int k)
     dispatch_once(&once, ^{
         for (int i = 0; i < XEK_N; i++) { const char *e = getenv(xek_name[i]); xek_start[i] = e && e[0] == '1'; atomic_store(&xek_cur[i], xek_start[i]); }
         xek_ws = getprogname() && !strcmp(getprogname(), "WindowServer");
-        nvlog("fps knobs at start: RO_ONCE %d, HOSTCOPY_AHEAD %d, WORKER_AHEAD %d, EMPTY_TAIL %d (/Library/GPUBundles/nvmtl/live.conf overrides them while this process runs)",
-              xek_start[0], xek_start[1], xek_start[2], xek_start[3]);
+        nvlog("fps knobs at start: RO_ONCE %d, HOSTCOPY_AHEAD %d, WORKER_AHEAD %d, EMPTY_TAIL %d, QUEUE_LEAP %d (/Library/GPUBundles/nvmtl/live.conf overrides them while this process runs)",
+              xek_start[0], xek_start[1], xek_start[2], xek_start[3], xek_start[4]);
         atomic_store(&xek_checked, clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
         xek_reload();
     });
@@ -150,7 +158,7 @@ static void nvmtl_xe_fps_preset(char *recbuf, size_t cap, size_t *recn, unsigned
 {
     const char *v = getenv("NVMTL_XE_FPS");
     if (!v || v[0] != '1') return;
-    for (unsigned i = 0; i < XEK_N; i++)
+    for (unsigned i = 0; i < XEK_FPS_N; i++)
         if (!getenv(xek_name[i]) && setenv(xek_name[i], "1", 0) == 0) {
             if (recbuf && recn) {
                 int k = snprintf(recbuf + *recn, cap - *recn, "%s%s=1", *recn ? ";" : "", xek_name[i]);
