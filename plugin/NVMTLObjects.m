@@ -85,7 +85,8 @@ static void nvmtl_res2_note_use(NVMTLTexture *t);
 static uint64_t nvmtl_res2_evict(uint64_t want);
 extern uint64_t (*nvmtl_res2_evict_hook)(uint64_t want);
 // GU605 vibrancy preset: NVMTL_XE_VIBRANCY=1 (nvrm610.conf or the environment) is the best guess in one line; any of its
-// knobs set on its own wins. Records what it set in the NVMTL_CONF_SET list when one is given.
+// knobs set on its own wins. Records what it set in the NVMTL_CONF_SET list when one is given. Since 2026-11-09 (fixed on
+// the hardware with this preset) its settings are also the defaults, so the line is harmless; =snap / =0 undo a part.
 static void nvmtl_xe_vibrancy_preset(char *recbuf, size_t cap, size_t *recn, unsigned *took)
 {
     const char *v = getenv("NVMTL_XE_VIBRANCY");
@@ -828,10 +829,10 @@ static NVMTLTexture *nvmtl_texbuf_make(NVMTLBuffer *b, MTLTextureDescriptor *d, 
                   v ? "view of a stand-in resynced at every submission" : "stand-in view also REFUSED, copied texture"); }
             if (v) return v;
         }
-        // GU605 (NVMTL_XE_TILED_PAD=1): a pitch the linear texture header cannot take (WindowServer's 44x16 at 176 B)
+        // GU605 (NVMTL_XE_TILED_PAD, default on; =0 the one-time copy): a pitch the linear texture header cannot take (WindowServer's 44x16 at 176 B)
         // gets a stand-in with the pitch rounded up to 64 B, refilled row by row at every submission, instead of the
         // one-time copy below that goes stale when the caller rewrites its bytes
-        static int pad = -1; if (pad < 0) { const char *e = getenv("NVMTL_XE_TILED_PAD"); pad = e && e[0] == '1'; }
+        static int pad = -1; if (pad < 0) { const char *e = getenv("NVMTL_XE_TILED_PAD"); pad = !(e && e[0] == '0'); }   // default on since 2026-11-09
         const size_t pp = ((size_t)bpr + 63) & ~(size_t)63;
         if (pad && pp != bpr && offset + (size_t)bpr * (d.height - 1) + MIN((size_t)bpr, (size_t)d.width * 16) <= _b.size) {
             NVMTLBuffer *s2 = [NVMTLBuffer new];

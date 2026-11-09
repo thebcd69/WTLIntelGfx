@@ -3406,10 +3406,12 @@ int nvmtl_vk_self_sample_mode(void)
 {
     static int mode = -1;
     if (mode < 0) {
+        // GU605 2026-11-09: barrier is the default on Intel (vibrancy fixed on the hardware with it, NVMTL_XE_VIBRANCY=1);
+        // NVMTL_XE_SELF_SAMPLE=snap brings back the pre-pass snapshot, =off neither snapshot nor barrier
         const char *e = getenv("NVMTL_XE_SELF_SAMPLE");
-        mode = !e || !*e || !strcmp(e, "snap") ? 1 : !strcmp(e, "barrier") ? 2 : !strcmp(e, "off") ? 0 : 1;
+        mode = !e || !*e ? 2 : !strcmp(e, "snap") ? 1 : !strcmp(e, "barrier") ? 2 : !strcmp(e, "off") ? 0 : 2;
         nvlog("vk: self-sampled targets: %s (NVMTL_XE_SELF_SAMPLE=%s)", mode == 2 ? "BARRIER - reads see the draws before them"
-              : mode == 1 ? "snapshot taken before the pass" : "OFF", e ? e : "unset");
+              : mode == 1 ? "snapshot taken before the pass" : "OFF", e ? e : "unset, barrier is the default");
     }
     return mode;
 }
