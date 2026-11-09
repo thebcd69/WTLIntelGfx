@@ -10,10 +10,23 @@
 // Safety (checked here and again in xg_kms_i2c): writes only to 7-bit 0x37, reads only from 0x37 or 0x50 (EDID, at
 // most a one-byte offset written first); a send is at most 64 bytes, a reply at most 256; the reply delay at most
 // 500 ms; any failure answers the request with an error and moves no data. Boot-arg -xeintelfbnoddc: no bus.
+// Switch without a boot-arg (the OpenCore config rewrites boot-args, 2026-11-09): the property XeGfxDdcEnable
+// (root only: tools/xeddcprobe enable 0|1; gu605-auto.sh applies gu605.conf DDC= at every boot). Off: every request
+// answers kIOReturnNoDevice, the bus stays published.
+// Lessons from the NVIDIA DDC work (thebcd69/nvidia-macos-driver ddc-location, 2026-11-05):
+//  * IOFramebufferI2CInterface::startIO refuses every request with kIOReturnOffline unless isPowered()
+//    (pendingPowerState != 0), and IOGraphicsLib hides that error (clients get their own bytes back). IONDRVFramebuffer
+//    keeps IOFramebuffer's setPowerState (it only registers power states), so PM sets it here; it is still set to 1 once
+//    before IONDRVFramebuffer::start, as NVRMFB does, in case no power change reaches this framebuffer after start
+//    (only the I2C nub reads it outside a power change; the family's power work runs on pendingPowerChange).
+//  * BetterDisplay finds a display's framebuffer from its IODisplayLocation (a registry path): two framebuffers with
+//    the same path sent every request to the first. Here one XeGfxIntelFramebuffer drives whichever display has the
+//    picture (one at a time), under GFX0@2, so its path is unique; tools/xeddcprobe checks that every display's
+//    IODisplayLocation resolves to itself and to a framebuffer with a bus.
 // Status without sudo: ioreg -r -w0 -c XeGfxIntelFramebuffer -d1 | grep XeGfxDdc
 // Written against IOFramebuffer's and IOI2CInterface's public interfaces (NullMoth's NVRMFB DDC branch, PolyForm-NC,
 // was a design reference, none of its code is here).
-    bool fDdcBus = false;
+    bool fDdcBus = false, fDdcOn = true;
     unsigned fDdcCalls = 0, fDdcOk = 0, fDdcErr = 0;
     struct XifbI2c { uint32_t addr, wlen, rlen; uint8_t *wbuf, *rbuf; int rdone; };   // struct xg_kms_i2c
 
@@ -35,14 +48,31 @@
                 if (OSNumber *n = OSNumber::withNumber(e.v, 32)) { bus->setObject(e.k, n); n->release(); }
             arr->setObject(bus);
             fDdcBus = setProperty(kIOFBI2CInterfaceInfoKey, arr);
+            // the NVIDIA lesson (above): the I2C nub answers kIOReturnOffline while pendingPowerState is 0. Before start
+            // nothing else touches the bitfields; PM overwrites the value with the real state at its next change.
+            if (fDdcBus && !pendingPowerState) pendingPowerState = 1;
         }
         OSSafeReleaseNULL(bus); OSSafeReleaseNULL(arr);
         ddcStatus(fDdcBus ? "bus published; active while an external monitor has the picture" : "bus not published (no memory)");
     }
     void ddcStatus(const char *s) {
-        char line[200];
-        snprintf(line, sizeof line, "%s | n %u ok %u err %u", s, fDdcCalls, fDdcOk, fDdcErr);
+        char line[240];
+        snprintf(line, sizeof line, "%s | %s, power state %u | n %u ok %u err %u", s, fDdcOn ? "on" : "OFF (XeGfxDdcEnable)",
+                 (unsigned)pendingPowerState, fDdcCalls, fDdcOk, fDdcErr);
         setProperty("XeGfxDdc", line);
+    }
+    // XeGfxDdcEnable (a boolean or a number) from an administrator: DDC on or off at once, no reboot
+    IOReturn setProperties(OSObject *props) override {
+        OSDictionary *d = OSDynamicCast(OSDictionary, props);
+        OSObject *v = d ? d->getObject("XeGfxDdcEnable") : nullptr;
+        if (!v) return IONDRVFramebuffer::setProperties(props);
+        if (IOUserClient::clientHasPrivilege(current_task(), kIOClientPrivilegeAdministrator) != kIOReturnSuccess) return kIOReturnNotPrivileged;
+        OSBoolean *b = OSDynamicCast(OSBoolean, v); OSNumber *n = OSDynamicCast(OSNumber, v);
+        if (!b && !n) return kIOReturnBadArgument;
+        fDdcOn = b ? b->isTrue() : n->unsigned32BitValue() != 0;
+        ddcStatus(fDdcOn ? "switched on (XeGfxDdcEnable)" : "switched off (XeGfxDdcEnable)");
+        XIFBLOG("ddc: %s by XeGfxDdcEnable", fDdcOn ? "on" : "off");
+        return kIOReturnSuccess;
     }
     static IOReturn ddcErr(int e) {
         return e == -ENODEV || e == -ENOENT ? kIOReturnNoDevice : e == -EPERM ? kIOReturnNotPermitted :
@@ -53,7 +83,7 @@
         char name[sizeof fConnName]; bool ext = false;
         *got = 0; *rc = 0;
         if (fKmsLock) { IOLockLock(fKmsLock); ext = fKmsUp && fExternal; strlcpy(name, fConnName, sizeof name); IOLockUnlock(fKmsLock); }
-        if (!ext) return kIOReturnNoDevice;
+        if (!ext || !fDdcOn) return kIOReturnNoDevice;
         XifbI2c x = { addr, wl, rl, w, r, 0 };
         int res = -EIO;
         if (!xifbKmsCall(6, (void *)name, &x, &res) || res) { *rc = res; return ddcErr(res); }

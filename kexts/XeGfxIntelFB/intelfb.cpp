@@ -17,6 +17,8 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/graphics/IODisplay.h>
 #include <IOKit/i2c/IOI2CInterface.h>   // gu605-ddc (ddc.inc)
+#include <IOKit/IOUserClient.h>         // gu605-ddc: clientHasPrivilege (XeGfxDdcEnable)
+#include <kern/task.h>
 #include <sys/errno.h>
 
 #define XIFBLOG(fmt, ...) IOLog("XeGfxIntelFB: " fmt "\n", ##__VA_ARGS__)
