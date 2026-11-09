@@ -61,6 +61,7 @@ for s in $(seq 1 "$TARGET"); do
     fi
     # the GuC slot check, from stage 2's probe: never let i915 load the GuC under the panel's pixels
     # (KMS: i915 rebinds the surface at GGTT 0 itself before it reserves the GuC slot)
+    surf=""   # set -u: with KMS=1 nothing below set it, and "$surf" stopped the run before stage 4 (2026-11-09)
     [ "$KMS" = 1 ] || surf=$(sed -nE 's/.*"plane-surf-1-a"=([0-9]+).*/\1/p' "$OUT/stage3-ioreg-XeGfxResident.txt" "$OUT/stage2-ioreg-XeGfxResident.txt" "$OUT/stage0-ioreg-XeGfxResident.txt" 2>/dev/null | head -1)
     if [ -n "$surf" ]; then surf=$((surf & 0xFFFFF000))
       printf 'boot surface GGTT 0x%08X\n' "$surf" | tee -a "$OUT/stages.log"
