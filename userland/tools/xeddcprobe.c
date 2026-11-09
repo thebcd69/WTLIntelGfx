@@ -185,9 +185,7 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[1], "enable") && argc > 2) {
         const IOReturn r = IORegistryEntrySetCFProperty(intel, CFSTR("XeGfxDdcEnable"), atoi(argv[2]) ? kCFBooleanTrue : kCFBooleanFalse);
         char st[256]; prop_str(intel, CFSTR("XeGfxDdc"), st, sizeof st);
-        printf("XeGfxDdcEnable %s: 0x%x%s
-XeGfxDdc %s
-", atoi(argv[2]) ? "1" : "0", r, r == (IOReturn)0xe00002c1 ? " (not root)" : "", st);
+        printf("XeGfxDdcEnable %s: 0x%x%s\nXeGfxDdc %s\n", atoi(argv[2]) ? "1" : "0", r, r == (IOReturn)0xe00002c1 ? " (not root)" : "", st);
         rc = r ? 1 : 0;
     }
     else {
