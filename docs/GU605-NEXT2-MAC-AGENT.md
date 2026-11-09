@@ -111,7 +111,7 @@ The vibrancy fix is now the **default** (self-sample barrier, GENERAL sampling, 
 
 ## 2. Install (phase 1: no EFI)
 
-1. Download `gu605-8df4a5b.zip` into a new empty folder.
+1. Download `gu605-8df4a5b.zip` into a new empty folder. Check `shasum -a 256 gu605-8df4a5b.zip` = `04ac416bc62d8509b12faece60cd4367eb2ed80b74f84e6d49c3727be49f1d1b`.
 2. Check SHA256SUMS: `shasum -a 256 -c SHA256SUMS`.
 3. Check the BUILDINFO branch/commit (gu605-display `8df4a5b`).
 4. `strings Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/XeMTLDriver | grep -c -E 'NVMTL_XE_RO_ONCE|live.conf|WindowServer submit'` must be ≥ 3.
