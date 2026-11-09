@@ -2,12 +2,12 @@
 
 **For:** the Claude session on the owner's GU605MY, working on branch **gu605-mac**.
 **From:** the build agent, 2026-11-09.
-**Package:** prerelease **`<PKG>`**, built from **gu605-display `<DSHA>`**. It is the one package with everything:
+**Package:** prerelease **`gu605-8df4a5b`**, built from **gu605-display `8df4a5b`**. It is the one package with everything:
 - the frame-rate work;
 - the i915 display path;
 - Intel DDC.
 
-Check its BUILDINFO.txt. The fps-only build from gu605-mtl is `<MPKG>` (same plugin and XeGfxAccel).
+Check its BUILDINFO.txt. The fps-only build from gu605-mtl is `gu605-d4b6fb9` (same plugin and XeGfxAccel).
 
 **Inputs read:**
 - `docs/GU605-MAC-VIBRANCY-20261109.md`
@@ -111,12 +111,13 @@ The vibrancy fix is now the **default** (self-sample barrier, GENERAL sampling, 
 
 ## 2. Install (phase 1: no EFI)
 
-1. Download `<PKG>.zip` into a new empty folder.
+1. Download `gu605-8df4a5b.zip` into a new empty folder.
 2. Check SHA256SUMS: `shasum -a 256 -c SHA256SUMS`.
-3. Check the BUILDINFO branch/commit (gu605-display `<DSHA>`).
+3. Check the BUILDINFO branch/commit (gu605-display `8df4a5b`).
 4. `strings Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/XeMTLDriver | grep -c -E 'NVMTL_XE_RO_ONCE|live.conf|WindowServer submit'` must be ≥ 3.
 5. `sudo bash scripts/gu605-install.sh`. It:
    - backs everything up to `/Library/XeGfx/gu605-backup-<date>/` (moves, no deletion);
+   - **AIR reader:** it must copy NullMoth's `air-runtime` ("AIR reader: copied from NullMoth's NVMTLDriver.bundle"). This package was built on a macOS 26 runner, and its own `userland/air-runtime/libLLVM.dylib` has minos 26.0, so it cannot load on 15.8.1. If the installer says "from the package", stop and copy NullMoth's by hand. Everything else was checked: the plugin and tools are minos 15.0, `libvulkan_intel` 14.4, libdrm 11.0, and the translator is bundled;
    - installs the four aux-collection kexts (**XeGfxAccel has the asynchronous flip**), the plugin bundle (carrying NullMoth's `air-runtime` over), the scripts, and the tools `fpsprobe` and `xeddcprobe`;
    - rebuilds the aux collection, keeping NullMoth's kexts;
    - keeps the existing `gu605.conf`.
