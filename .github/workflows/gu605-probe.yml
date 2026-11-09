@@ -9,3 +9,14 @@ jobs:
     timeout-minutes: 5
     steps:
       - run: uname -a; date -u
+  # whether the hosted macOS image gu605.yml uses picks up jobs for this account (2026-11-09: macos-14 retired;
+  # macos-15 and macos-15-intel jobs sat queued while macos-26 and macos-latest ran at once)
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - run: sw_vers; uname -m; ls -d /Applications/Xcode*.app; date -u
