@@ -111,6 +111,8 @@ static void nvaccelInstallSysctl(void);
 extern SInt64 gCntPipeInit;
 static void nvXeTraceStart(void);
 static void nvXeFlipShutdown(void);   // <xeflip>
+static bool nvXeFlipAsyncBusy(const void *pipe);   // <xfasync>
+static void nvXeTxnNote(uint64_t t0);
 #endif
 static int gNvAccelArmed = 0;
 // 1 once the headless check restored the plugin name without arming (no NVIDIA display head). The Metal plugin reads it:
@@ -1390,6 +1392,9 @@ static bool nvAccelIopAsyncBusy(const void *pipe);
 bool NVDisplayPipe::isTransactionComplete(IOAccelDisplayPipeTransaction2 *)
 {
     NVPIPE_CNT(gCntPipeComplete);
+#ifdef NMX_XEGFX
+    if (nvXeFlipAsyncBusy(this)) return false;   // <xfasync> the Intel panel's flip is still landing
+#endif
     return gNvIop != 0 && !nvAccelIopAsyncBusy(this);
 }
 
@@ -1604,11 +1609,14 @@ static bool nvXeWaitVblank(IOPCIDevice *pci, unsigned h)
 // </wtl>
 #endif
 #ifndef XEFLIP_TRY
-#define XEFLIP_TRY(a, fb, head, s) false
+#define XEFLIP_TRY(a, fb, head, s, pipe) false
 #endif
 IOReturn NVDisplayPipe::performTransaction(IOAccelDisplayPipeTransaction2 *txn)
 {
     NVPIPE_CNT(gCntPipePerform);
+#ifdef NMX_XEGFX
+    const uint64_t txnT0 = mach_absolute_time();
+#endif
     if (!gNvIop) return (IOReturn)0xe00002c7;
     if (!txn) NVIOP_FAIL(kIOReturnBadArgument, "performTransaction(NULL)");
     NVAccel *a = NVAccel::gAccel;
@@ -1643,8 +1651,11 @@ IOReturn NVDisplayPipe::performTransaction(IOAccelDisplayPipeTransaction2 *txn)
         if ((unsigned long long)pitch < 4ull * w) NVIOP_FAIL(kIOReturnBadArgument, "resource %ux%u: +0xb8 reads %u, which is not a row pitch (need >= %u) — not a surface buffer", w, h, pitch, 4u * w);
         if ((unsigned long long)h * pitch > vm->fBytes) NVIOP_FAIL(kIOReturnOverrun, "resource %ux%u pitch %u exceeds its %llu bytes", w, h, pitch, (unsigned long long)vm->fBytes);
         src = (const volatile unsigned int *)vm->fKva; fromRes = true;
-    } else if (s && (XEFLIP_TRY(a, fb, head, s) || nvAccelIopFlip(fb, head, s, this))) {
+    } else if (s && (XEFLIP_TRY(a, fb, head, s, this) || nvAccelIopFlip(fb, head, s, this))) {
         OSAddAtomic64(1, &gCntIopSrcSurf); OSAddAtomic64(1, &gCntIopOk); OSAddAtomic64(1, &gCntIopOkHead[head]);
+#ifdef NMX_XEGFX
+        if (head == 4) nvXeTxnNote(txnT0);   // <xfasync> how long WindowServer's thread was held
+#endif
         return kIOReturnSuccess;
     } else if (s) {
         // A copied frame must come from the surface's newest pixels. Copying while they were still only in VRAM put a

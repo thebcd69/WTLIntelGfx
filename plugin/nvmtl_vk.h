@@ -209,6 +209,7 @@ void nvmtl_vk_res2_stats(uint64_t out[5]);
 int nvmtl_vk_buffer_migrate(nvk_buffer *b, int to_sysmem);
 void nvmtl_vk_res3_stats(uint64_t out[6]);
 int  nvmtl_vk_submit_begin_at(nvk_cmdbuf *c, nvmtl_inflight *f, const char *who);
+void nvmtl_vk_queue_submit_stats(uint64_t out[4]);   // GU605: vkQueueSubmit count, ns, max ns, ns before it (read and reset)
 #define nvmtl_vk_submit_wait(c) nvmtl_vk_submit_wait_at((c), __func__)
 #define nvmtl_vk_submit_begin(c, f) nvmtl_vk_submit_begin_at((c), (f), __func__)
 int  nvmtl_vk_submit_finish(nvmtl_inflight *f);

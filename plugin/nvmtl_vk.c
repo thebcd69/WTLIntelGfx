@@ -1433,6 +1433,7 @@ static int nvmtl_range_writable(const void *ptr, size_t size)
     }
     return 1;
 }
+int nvmtl_vk_range_writable(const void *ptr, size_t size) { return ptr && size ? nvmtl_range_writable(ptr, size) : 0; }
 
 int nvmtl_vk_buffer_import_host(void *ptr, size_t size, nvk_buffer *out)
 {
@@ -3406,10 +3407,12 @@ int nvmtl_vk_self_sample_mode(void)
 {
     static int mode = -1;
     if (mode < 0) {
+        // GU605 2026-11-09: barrier is the default on Intel (vibrancy fixed on the hardware with it, NVMTL_XE_VIBRANCY=1);
+        // NVMTL_XE_SELF_SAMPLE=snap brings back the pre-pass snapshot, =off neither snapshot nor barrier
         const char *e = getenv("NVMTL_XE_SELF_SAMPLE");
-        mode = !e || !*e || !strcmp(e, "snap") ? 1 : !strcmp(e, "barrier") ? 2 : !strcmp(e, "off") ? 0 : 1;
+        mode = !e || !*e ? 2 : !strcmp(e, "snap") ? 1 : !strcmp(e, "barrier") ? 2 : !strcmp(e, "off") ? 0 : 2;
         nvlog("vk: self-sampled targets: %s (NVMTL_XE_SELF_SAMPLE=%s)", mode == 2 ? "BARRIER - reads see the draws before them"
-              : mode == 1 ? "snapshot taken before the pass" : "OFF", e ? e : "unset");
+              : mode == 1 ? "snapshot taken before the pass" : "OFF", e ? e : "unset, barrier is the default");
     }
     return mode;
 }
@@ -6045,6 +6048,20 @@ static void nvmtl_subwho_note(const char *who, uint64_t ns)
         nvlog("vk: submit census over %llu submissions - %s", (unsigned long long)total, line);
     }
 }
+// GU605: what vkQueueSubmit costs (ANV's execbuffer through i915), and how long a submission spends in the plugin
+// before it (end of recording, fence, the managed-upload prologue, the submit lock); read and reset by
+// nvmtl_vk_queue_submit_stats for WindowServer's 5 s summary
+static _Atomic uint64_t g_qs_n, g_qs_ns, g_qs_max, g_qs_pre_ns;
+static void nvmtl_qs_note(uint64_t ns, uint64_t pre_ns)
+{
+    atomic_fetch_add(&g_qs_n, 1); atomic_fetch_add(&g_qs_ns, ns); atomic_fetch_add(&g_qs_pre_ns, pre_ns);
+    for (uint64_t m = atomic_load(&g_qs_max); ns > m && !atomic_compare_exchange_weak(&g_qs_max, &m, ns); ) ;
+}
+void nvmtl_vk_queue_submit_stats(uint64_t out[4])
+{
+    out[0] = atomic_exchange(&g_qs_n, 0); out[1] = atomic_exchange(&g_qs_ns, 0);
+    out[2] = atomic_exchange(&g_qs_max, 0); out[3] = atomic_exchange(&g_qs_pre_ns, 0);
+}
 int nvmtl_vk_submit_wait_at(nvk_cmdbuf *c, const char *who)
 {
     nvmtl_inflight f;
@@ -6113,7 +6130,9 @@ int nvmtl_vk_submit_begin_at(nvk_cmdbuf *c, nvmtl_inflight *f, const char *who)
     nvmtl_wit_control(wseq);
     const uint64_t sE = nvmtl_perf_now();
     if (pt[0]) { pt[1] = pt[0] + (sA - pt[0]) + (sD - sC); pt[2] = pt[1] + (sB - sA) + (sE - sD); pt[3] = pt[2] + (sC - sB); }
+    const uint64_t qs0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
     result = g_state == 1 ? pvkQueueSubmit(g_queue, 1, &si, fence) : VK_ERROR_DEVICE_LOST;
+    nvmtl_qs_note(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - qs0, qs0 - c->timing.host_before_ns);
     pthread_mutex_unlock(&nvmtl_submit_mutex);
     pt[4] = nvmtl_perf_now();
     g_cmd_submitted++;

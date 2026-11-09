@@ -102,7 +102,22 @@ if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
     ws2=$(pgrep -x WindowServer | head -1); f1=$(sysctl -n debug.nvaccel_iop_fail 2>/dev/null)
     if [ "$ws2" != "$ws" ] || [ "${f1:-0}" != "${f0:-0}" ]; then
       sysctl -w debug.nvaccel_xeflip=0 > /dev/null 2>&1; touch "$G/xeflip-off"; say "flip OFF for later boots (WindowServer $ws -> $ws2, failures $f0 -> $f1)"
-    else say "flip confirmed: $(sysctl -n debug.nvaccel_xeflip_flips 2>/dev/null) flipped, $(sysctl -n debug.nvaccel_xeflip_copied 2>/dev/null) copied"; fi
+    else
+      say "flip confirmed: $(sysctl -n debug.nvaccel_xeflip_flips 2>/dev/null) flipped, $(sysctl -n debug.nvaccel_xeflip_copied 2>/dev/null) copied"
+      # asynchronous flip (FLIP_ASYNC=1, gu605.conf): WindowServer's thread no longer waits for the GPU or the latch; the
+      # same one-minute guard, and the file mark xeflip-async-off keeps it off for later boots
+      if [ "$(conf FLIP_ASYNC 0)" = 1 ] && [ ! -e "$G/xeflip-async-off" ] && sysctl -n debug.nvaccel_xeflip_async > /dev/null 2>&1; then
+        a0=$(sysctl -n debug.nvaccel_xeflip_async_flips 2>/dev/null); f0=$(sysctl -n debug.nvaccel_iop_fail 2>/dev/null)
+        sysctl -w debug.nvaccel_xeflip_async=1 > /dev/null 2>&1; say "flip: asynchronous ON"
+        sleep 60
+        ws3=$(pgrep -x WindowServer | head -1); f1=$(sysctl -n debug.nvaccel_iop_fail 2>/dev/null); a1=$(sysctl -n debug.nvaccel_xeflip_async_flips 2>/dev/null)
+        on=$(sysctl -n debug.nvaccel_xeflip_async 2>/dev/null)
+        if [ "$ws3" != "$ws" ] || [ "${f1:-0}" != "${f0:-0}" ] || [ "${on:-0}" != 1 ]; then
+          sysctl -w debug.nvaccel_xeflip_async=0 > /dev/null 2>&1; touch "$G/xeflip-async-off"
+          say "asynchronous flip OFF for later boots (WindowServer $ws -> $ws3, failures $f0 -> $f1, still on: ${on:-?})"
+        else say "asynchronous flip confirmed: ${a0:-0} -> ${a1:-0} flips, $(sysctl -n debug.nvaccel_xeflip_async_drops 2>/dev/null) dropped, WindowServer held $(sysctl -n debug.nvaccel_xeflip_txn_us_max 2>/dev/null) us at most"; fi
+      fi
+    fi
   fi
   sysctl debug.nvaccel_iop_ok_h4 debug.nvaccel_iop_fail debug.nvaccel_pipe_perform 2>/dev/null >> "$S"
   finish "desktop on the Intel GPU"
