@@ -1,0 +1,100 @@
+== verdict: ws.* tests per setting (base must FAIL, preset-as-ws must PASS for the fix to be the right one)
+as-windowserver ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+as-windowserver ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+as-windowserver ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+as-windowserver ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+base ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+base ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+base ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+base ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+no-dirtyonly ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+no-dirtyonly ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+no-dirtyonly ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+no-dirtyonly ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+no-psoskip ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+no-psoskip ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+no-psoskip ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+no-psoskip ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+noccs-nofc ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+noccs-nofc ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+noccs-nofc ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+noccs-nofc ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+noccs ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+noccs ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+noccs ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+noccs ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+nofc ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+nofc ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+nofc ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+nofc ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+preset-as-ws ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+preset-as-ws ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+preset-as-ws ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+preset-as-ws ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+sample-general-as-ws ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+sample-general-as-ws ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+sample-general-as-ws ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+sample-general-as-ws ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+self-barrier-as-ws ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+self-barrier-as-ws ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+self-barrier-as-ws ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+self-barrier-as-ws ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+self-barrier ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+self-barrier ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+self-barrier ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+self-barrier ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+self-off-as-ws ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+self-off-as-ws ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+self-off-as-ws ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+self-off-as-ws ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: FAIL 1/20 frames read what the pass drew, 19 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 49.5
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: FAIL 0/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 10 other; worst mean diff 85.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+summary ws.selfsample-load: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.selfsample-clear: PASS 20/20 frames read what the pass drew, 0 read the pass's starting pixels (pre-pass copy), 0 other (stale/black); worst mean diff 0.0
+summary ws.backdrop-load: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Load)
+summary ws.backdrop-clear: PASS 10/10 frames B blurred+saturated, 0 from the old picture A, 0 black, 0 other; worst mean diff 0.5 (mip passes Clear)
+== WindowServer's plugin, this boot (refused / skipped / failed work)
+== /Library/GPUBundles/xemtl/nvrm610.conf (read by the plugin at WindowServer start)
+(none)
