@@ -38,7 +38,7 @@ ddcctl / MonitorControl / ghelper-mac
 | Süre | yanıt beklemesi ≤ 500 ms; AUX/GMBUS zaman aşımları i915'inki |
 | Hedef | yalnız bağlı harici bağlayıcı; eDP/LVDS asla |
 | Hata | isteğe hata kodu, veri taşınmaz (`replyBytes` = 0) |
-| Kapatma | boot-arg `-xeintelfbnoddc` (bus yayınlanmaz); `-xeintelfbnokms` de kapatır |
+| Kapatma | `gu605.conf` `DDC=0` (her açılışta) veya hemen `sudo tools/xeddcprobe enable 0` (XeGfxDdcEnable özelliği; boot-arg gerekmez); ayrıca boot-arg `-xeintelfbnoddc` (bus yayınlanmaz), `-xeintelfbnokms` |
 
 ## Durum
 | Kalem | Durum |
@@ -69,3 +69,14 @@ ddcctl / MonitorControl / ghelper-mac
 
 ## Lisans
 Yeni kod BSD-2 (WTL'nin lisansı). NullMoth NVRMFB DDC dalı (PolyForm-NC) yalnız tasarım referansı; kodu kopyalanmadı.
+
+## NVIDIA DDC'den alınan dersler (2026-11-09, `ddc-location` / DDC-RAPOR-20261105)
+* **pendingPowerState**: IOGraphics, `pendingPowerState == 0` iken her isteğe `kIOReturnOffline` döner ve
+  IOGraphicsLib bunu gizler. XeGfxIntelFB (IONDRVFramebuffer) IOFramebuffer'ın `setPowerState`'ini korur, yine de
+  bus yayınlanınca `IONDRVFramebuffer::start`'tan önce bir kez 1 yapılır (NVRMFB 47039af gibi); `XeGfxDdc` satırı
+  güç durumunu gösterir.
+* **IODisplayLocation**: BetterDisplay framebuffer'ı bu yoldan bulur. Burada tek XeGfxIntelFramebuffer (GFX0 altında)
+  hangi ekran görüntüdeyse onu sürer: yol tek. Harici bağlantı "yerleşik değil" bildirir (AppleDisplay).
+  `tools/xeddcprobe` her ekranın yolunun kendine ve bus'lı bir framebuffer'a çözüldüğünü denetler; `xeddcprobe diag`
+  gerçek IOReturn kodlarını gösterir.
+

@@ -57,6 +57,29 @@ desktop), `FLIP`, `WSMARK`, `K5`, `EFI_LOG`.
 | dosya `/Library/XeGfx/gu605/autostart-off` | otomatik koşu kapalı (onaylanmayan bir koşudan sonra kendiliğinden yazılır) |
 | Safe Mode | koşucu hiçbir şey yapmaz |
 
+**Boot-arg gerektirmeyen anahtarlar (2026-11-09; OpenCore config'i boot-arg'ları yeniden yazdığı için asıl yol bunlar):**
+
+| Ne | Etki |
+|---|---|
+| `gu605.conf` `DISPLAY=adopt` | i915 ekran yolu kapalı (varsayılan); `kms` açar |
+| `gu605.conf` `DDC=0` / hemen: `sudo /Library/XeGfx/gu605/tools/xeddcprobe enable 0` | harici monitörde DDC/CI kapalı |
+| `gu605.conf` `FLIP_ASYNC=0` / hemen: `sudo sysctl -w debug.nvaccel_xeflip_async=0` | eşzamansız flip kapalı (varsayılan) |
+| dosya `/Library/XeGfx/gu605/xeflip-async-off` | eşzamansız flip sonraki açılışlarda kapalı (ilk dakikada sorun olursa kendiliğinden yazılır) |
+| dosya `/Library/GPUBundles/xemtl/live.conf` | WindowServer çalışırken fps anahtarları (`NVMTL_XE_RO_ONCE` vb.); yeniden adlandırınca eski değerlere döner |
+
+## 3a. Ekran yolu paketi (gu605-display, 2026-11-09): EFI'de tek değişiklik
+
+Sol USB-C monitör (DISPLAY=kms) için **yalnız** `EFI/OC/Kexts/XeGfx.kext` klasörü pakettekiyle değişir;
+`config.plist`'e dokunulmaz (XeGfx.kext zaten Kernel>Add'de). Sahibin açık onayıyla, ofiste:
+1. Eski klasör silinmez: `EFI/OC/Kexts-backup/XeGfx.kext.before-<tarih>` olarak taşınır (OpenCore iki kopya görmesin
+   diye `Kexts` dışında).
+2. Pakettekinin kopyası konur; `shasum -a 256 XeGfx.kext/Contents/MacOS/XeGfx` paketin SHA256SUMS satırıyla aynı olmalı.
+3. `gu605.conf`'ta `DISPLAY=kms`.
+
+Geri alma: önce `DISPLAY=adopt` (yeni kext adopt yolunda eskisi gibi davranır). Gerekirse yeni klasör
+`Kexts-backup/XeGfx.kext.kms-<tarih>`'e taşınır, eskisi `Kexts/XeGfx.kext` olarak geri konur, sha256 kontrol edilir.
+macOS açılmazsa: G-Helper → Ultimate.
+
 Bir aşama donarsa: XeGfx'in bekçisi 60 sn'de bilerek panik yapar → yeniden açılış → koşucu "onaylanmadı" görür, kendini
 kapatır → masaüstü Intel framebuffer'ında yazılımsal olarak gelir. USB kurtarma diski gerekmez.
 
