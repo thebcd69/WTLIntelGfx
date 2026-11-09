@@ -6,6 +6,10 @@ ECO_LEVEL=metal
 STANDARD_LEVEL=probe
 # zero-copy flip after a confirmed desktop (samwu07), WindowServer completion marks, AGDC K5 link answers
 FLIP=1
+# asynchronous flip (XeGfxAccel debug.nvaccel_xeflip_async): the swap waits for the GPU and the panel's latch on its own
+# thread, not on WindowServer's (240 Hz). 0 = synchronous. Off for later boots by itself if WindowServer restarts in
+# its first minute (file mark xeflip-async-off; delete that file to try again)
+FLIP_ASYNC=0
 WSMARK=1
 K5=1
 # copy each run's summary to <EFI>/GU605/ (readable from Windows); 0 = never mount the EFI
