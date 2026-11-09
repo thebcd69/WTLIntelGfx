@@ -6186,7 +6186,10 @@ static void nvmtl_buffer_sync_out(NVMTLBuffer *b)
         return;
     }
     if (!b || !b->_hostPtr || !b->_b.map || !b->_hostLen || b->_hostRows) return;   // a padded stand-in is read-only
-    if (b->_hostRO && nvmtl_xek(XEK_RO_ONCE)) return;   // the caller's pages are not writable: nothing to copy back into
+    // the caller's pages are not writable by this process: nothing to copy back into, whatever NVMTL_XE_RO_ONCE says.
+    // Copying back faulted (SIGBUS, KERN_PROTECTION_FAILURE in memmove from nvmtlAdvancePart) as soon as a read-only
+    // NoCopy buffer was bound directly (fpsprobe's constant buffer, 2026-11-09 on the GU605).
+    if (b->_hostRO) return;
     const uint64_t t0 = nvmtl_perf_now();
     memcpy(b->_hostPtr, b->_b.map, b->_hostLen);
     nvmtl_perf_note(NVP_SYNCOUT, t0, b->_hostLen);

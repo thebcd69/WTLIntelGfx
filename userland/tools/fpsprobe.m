@@ -181,8 +181,15 @@ static void run(const char *name, double seconds, int inflight, double hz,
             [cb commit];
         }
     }
-    for (int i = 0; i < inflight; i++) dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+    // every committed frame must complete before sem goes away (libdispatch aborts on a semaphore disposed below its
+    // start value): wait up to 10 s for all n, then report the ones that never completed and keep sem alive
+    const double tw = CACurrentMediaTime();
+    while (atomic_load(&gDone) < n && CACurrentMediaTime() - tw < 10.0) usleep(1000);
     const double t1 = CACurrentMediaTime();
+    if (atomic_load(&gDone) < n) {
+        printf("FPS %s: %d of %d committed frames never completed (waited 10 s) - GPU or completion path stuck\n", name, n - atomic_load(&gDone), n);
+        (void)CFBridgingRetain(sem);   // completion handlers may still signal it: leaked on purpose
+    }
     free(glyphs);
     const int done = atomic_load(&gDone);
     double *q = calloc((size_t)n + 1, sizeof(double) * 5), *v[5];
@@ -216,6 +223,7 @@ static void run(const char *name, double seconds, int inflight, double hz,
 
 int main(int argc, char **argv)
 {
+    setvbuf(stdout, NULL, _IOLBF, 0);   // a crash in the plugin must not lose what was already printed
     @autoreleasepool {
         const double seconds = argc > 1 ? atof(argv[1]) : 5;
         const char *plugin = getenv("NM_TEST_PLUGIN");
