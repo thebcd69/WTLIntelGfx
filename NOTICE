@@ -23,7 +23,10 @@ XeGfx carries every part of the Intel driver, and not all of it is under
 BSD-2. Each folder keeps the licence of the code it came from:
 
   shim/, harness/, tools/, kext/, docs/      BSD 2-Clause (LICENSE)
-  kexts/XeGfxIntelFB/                        BSD 2-Clause, written for XeGfx
+  kexts/XeGfxIntelFB/                        BSD 2-Clause, written for XeGfx, except
+                                             nm_backlight.h: PolyForm Noncommercial
+                                             1.0.0, adapted from NullMoth's NVRMFB
+                                             backlight handler (GU605 branches)
   xkpi/                                      per file, see xkpi/NOTICE.md
                                              (MIT, BSD-2, PolyForm Noncommercial
                                              for the NullMoth dma-buf files)

@@ -184,8 +184,43 @@ static void xifbBacklightProbe(XifbBacklight *b, const uint8_t *edid, int edidLe
 }
 
 // percent of the interface range, floor 5 %; the first call switches DPCD control on the way i915's enable hooks do
+// GU605 display path (docs/GU605-DISPLAY-DESIGN.md): once XeGfx's stage 4 let Linux i915 own the display
+// (XeGfxKmsReady on XeGfxResident), the panel is i915's: brightness and modes go through its "xgKms" platform
+// function, and the direct AUX helpers in this file must stay quiet (they would race i915's own AUX traffic).
+// Boot-arg -xeintelfbnokms keeps this framebuffer on its own paths.
+static IOService *gXifbKms;   // retained once ready; XeGfx cannot unload after stage 4 anyway
+static IOService *xifbKmsService()
+{
+    if (gXifbKms) return gXifbKms;
+    int off = 0;
+    if (PE_parse_boot_argn("-xeintelfbnokms", &off, sizeof off)) return nullptr;
+    OSDictionary *m = IOService::serviceMatching("XeGfxResident"); if (!m) return nullptr;
+    IOService *r = IOService::copyMatchingService(m); m->release();
+    if (!r) return nullptr;
+    if (r->getProperty("XeGfxKmsReady") != kOSBooleanTrue) { r->release(); return nullptr; }
+    gXifbKms = r;
+    return r;
+}
+static bool xifbKmsCall(uintptr_t op, void *a, void *b, void *c)
+{
+    IOService *r = xifbKmsService(); if (!r) return false;
+    const OSSymbol *s = OSSymbol::withCStringNoCopy("xgKms"); if (!s) return false;
+    IOReturn ret = r->callPlatformFunction(s, false, (void *)op, a, b, c);
+    s->release();
+    return ret == kIOReturnSuccess;
+}
+struct XifbKmsMode { uint32_t w, h, clock_khz, htotal, hss, hse, vtotal, vss, vse, flags, mhz, preferred; };  // xg_kms_mode
+
 static bool xifbBacklightSet(XifbBacklight *b, uint32_t percent)
 {
+    if (percent < 5) percent = 5;
+    if (percent > 100) percent = 100;
+    if (xifbKmsService()) {   // i915's intel_backlight (PWM or DPCD, as i915 chose), per mille
+        int r = -1;
+        bool ok = xifbKmsCall(2, (void *)(intptr_t)(percent * 10), &r, nullptr) && r >= 0;
+        XIFBLOG("gu605 backlight: %u%% through i915 -> %d", percent, r);
+        return ok;
+    }
     if (b->kind == XIFB_BL_NONE) return false;
     if (percent < 5) percent = 5;
     if (percent > 100) percent = 100;

@@ -36,6 +36,19 @@ Her açılışın özeti ayrıca `EFI/GU605/last-boot.txt`'e kendiliğinden yaz�
 1. G-Helper **Standard** → macOS → giriş yap (masaüstü dahili panelde, hızlandırmasız olabilir).
 2. `gu605-collect.sh`.
 
+## Test 4 — Eco + i915 ekran yolu (yalnız `gu605-display` paketi, Test 2'den SONRA)
+1. `sudo nano /Library/XeGfx/gu605/gu605.conf` → `DISPLAY=kms`, `ECO_LEVEL=gt` (önce masaüstü olmadan), kaydet.
+2. Eco'da yeniden başlat, giriş ekranında ~3 dk bekle. Ekran **aynı kalmalı**; kısa bir kararma olabilir.
+   Panel 240 Hz'e kendiliğinden geçer (`PANEL_HZ=240`).
+3. Giriş yap → `sudo bash /Library/XeGfx/gu605/gu605-display.sh dump` (eDP modları, ölçülen Hz).
+4. Parlaklık: `sudo bash /Library/XeGfx/gu605/gu605-display.sh bl 300`, sonra klavye tuşları.
+5. Harici: monitörü **sol** USB-C'ye tak → ~2 sn içinde görüntü monitöre geçmeli (panel kapanır). Olmazsa:
+   `sudo bash /Library/XeGfx/gu605/gu605-display.sh external`. Çıkar → panel geri gelmeli
+   (olmazsa `... gu605-display.sh internal`).
+6. `gu605-collect.sh`. Siyah ekran kalırsa güç tuşuyla kapat/aç: sonraki açılış kendiliğinden eski yola döner
+   (`kms-failed`), ya da seçicide `-xegfxnokms`.
+7. Hepsi iyiyse `ECO_LEVEL=metal`, sonra `desktop` ile tekrarla.
+
 ## Ne bakılacak (kısaca not al)
 - Panel görüntü verdi mi, kaç Hz görünüyor (Sistem Ayarları › Ekranlar), parlaklık değişti mi.
 - Pencereler akıcı mı, renk/bulanıklık hatası var mı (bilinen: kenar çubuğu bulanıklığı saydam olabilir;
@@ -44,4 +57,4 @@ Her açılışın özeti ayrıca `EFI/GU605/last-boot.txt`'e kendiliğinden yaz�
 
 ## Acil
 G-Helper → Ultimate her zaman bugünkü kuruluma döner. OpenCore seçicide boot-arg: `-xegfxnoauto` (koşucu kapalı),
-`-xegfxoff` (XeGfx boşta), `-xeintelfboff` (Intel framebuffer kapalı).
+`-xegfxoff` (XeGfx boşta), `-xeintelfboff` (Intel framebuffer kapalı), `-xegfxnokms` (i915 ekran yolu kapalı).

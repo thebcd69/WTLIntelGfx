@@ -1433,6 +1433,7 @@ static int nvmtl_range_writable(const void *ptr, size_t size)
     }
     return 1;
 }
+int nvmtl_vk_range_writable(const void *ptr, size_t size) { return ptr && size ? nvmtl_range_writable(ptr, size) : 0; }
 
 int nvmtl_vk_buffer_import_host(void *ptr, size_t size, nvk_buffer *out)
 {
@@ -2583,9 +2584,24 @@ static int ensure_descriptors(void) {
     return result;
 }
 
+int nvmtl_vk_self_sample_mode(void);
+/* GU605 vibrancy: the layout sampled-image descriptors name. Colour attachments live in GENERAL inside a pass, and ANV
+ * keeps one sampler surface state per layout (the GENERAL one reads the aux state an attachment leaves), so a target
+ * sampled in its own pass or right after it is read with the matching state. NVMTL_XE_SAMPLE_GENERAL=1 / 0; unset:
+ * on in NVMTL_XE_SELF_SAMPLE=barrier mode. NVK ignores layouts either way. */
+static VkImageLayout nvmtl_sample_layout(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("NVMTL_XE_SAMPLE_GENERAL");
+        on = e && *e ? e[0] == '1' : nvmtl_vk_self_sample_mode() == 2;
+        nvlog("vk: sampled images are described in layout %s (NVMTL_XE_SAMPLE_GENERAL=%s)", on ? "GENERAL" : "SHADER_READ_ONLY_OPTIMAL", e ? e : "unset");
+    }
+    return on ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
 static void nvmtl_heap_write_locked(uint32_t slot, void *view)
 {
-    VkDescriptorImageInfo ii = { VK_NULL_HANDLE, (VkImageView)view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo ii = { VK_NULL_HANDLE, (VkImageView)view, nvmtl_sample_layout() };
     VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, NULL, g_heapSet, 0, slot, 1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &ii, NULL, NULL };
     pvkUpdateDescriptorSets(g_dev, 1, &w, 0, NULL);
 }
@@ -3099,7 +3115,7 @@ static VkDescriptorSet nvmtl_snapshot_set_md(nvk_cmdbuf *c, uint32_t which, uint
             // A texture slot whose sampled view could not be built is recorded with a null handle. The descriptor
             // written for it is the dummy image, never the null handle: a null view reads as zero in NVK, and a
             // debug NVK asserts on any handle that is not a live image view.
-            if (sl && sl->kind == NVMTL_SLOT_TEX && sl->h) { ii[i] = (VkDescriptorImageInfo){ VK_NULL_HANDLE, (VkImageView)sl->h, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }; pi = &ii[i]; }
+            if (sl && sl->kind == NVMTL_SLOT_TEX && sl->h) { ii[i] = (VkDescriptorImageInfo){ VK_NULL_HANDLE, (VkImageView)sl->h, nvmtl_sample_layout() }; pi = &ii[i]; }
             else {
                 if (sl && sl->kind == NVMTL_SLOT_TEX) { static int said; if (!said++) nvlog("vk: texture slot %u is bound to a texture with no sampled view - the dummy image is bound instead (said once)", i - NVMTL_NBUF); }
                 pi = &dummyI;
@@ -3377,14 +3393,53 @@ static void nvmtl_fetch_barrier(nvk_cmdbuf *c)
                           VK_DEPENDENCY_BY_REGION_BIT, 1, &mb, 0, NULL, 0, NULL);
 }
 // <wtl>
+/* GU605 vibrancy (docs/GU605-VIBRANCY-MAC-AGENT.md): how a fragment shader that samples its own pass's colour target
+ * is served. NVMTL_XE_SELF_SAMPLE (nvrm610.conf):
+ *   snap    (default) a copy of the target taken before the pass (Load passes); otherwise a barrier, only with
+ *           framebuffer fetch on (the pass has no self-dependency without it)
+ *   barrier Metal's immediate-mode answer (memoryBarrier/textureBarrier on the Mac family): the read sees every draw
+ *           before it. Render passes always declare their colour self-dependency, a draw that samples the attachment's
+ *           own level takes a by-region colour-write -> shader-read barrier first, and sampling another level of the
+ *           same texture is not treated as self-sampling at all
+ *   off     neither (the old xe-live bit 256)
+ * Re-read only at process start (WindowServer: one logout). */
+int nvmtl_vk_self_sample_mode(void)
+{
+    static int mode = -1;
+    if (mode < 0) {
+        // GU605 2026-11-09: barrier is the default on Intel (vibrancy fixed on the hardware with it, NVMTL_XE_VIBRANCY=1);
+        // NVMTL_XE_SELF_SAMPLE=snap brings back the pre-pass snapshot, =off neither snapshot nor barrier
+        const char *e = getenv("NVMTL_XE_SELF_SAMPLE");
+        mode = !e || !*e ? 2 : !strcmp(e, "snap") ? 1 : !strcmp(e, "barrier") ? 2 : !strcmp(e, "off") ? 0 : 2;
+        nvlog("vk: self-sampled targets: %s (NVMTL_XE_SELF_SAMPLE=%s)", mode == 2 ? "BARRIER - reads see the draws before them"
+              : mode == 1 ? "snapshot taken before the pass" : "OFF", e ? e : "unset, barrier is the default");
+    }
+    return mode;
+}
+/* the render pass's colour self-dependency: with framebuffer fetch, or in barrier mode */
+static int nvmtl_selfdep_on(void) { return nvmtl_fbfetch_on() || nvmtl_vk_self_sample_mode() == 2; }
 static void nvmtl_self_tex_barrier(nvk_cmdbuf *c)
 {
     // A draw that samples its own pass's attachment must see the earlier draws: Intel's render cache is not coherent
     // with the sampler, so without this WindowServer's software cursor read stale display pixels (a square trail).
-    if (!c->self_tex || !c->in_rp || !nvmtl_fbfetch_on()) return;
+    if (!c->self_tex || !c->in_rp || !nvmtl_selfdep_on()) return;
     VkMemoryBarrier mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER, NULL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT };
     pvkCmdPipelineBarrier(c->cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                           VK_DEPENDENCY_BY_REGION_BIT, 1, &mb, 0, NULL, 0, NULL);
+}
+/* Metal's memoryBarrier(renderTargets) / textureBarrier inside a render pass, barrier mode: the barrier the pass's
+ * self-dependency allows (a full ALL_COMMANDS barrier inside a pass is not one Vulkan permits there); outside a pass, or in
+ * the other modes, the old full barrier */
+void nvmtl_vk_cmd_rt_barrier(nvk_cmdbuf *c)
+{
+    if (c->in_rp && nvmtl_vk_self_sample_mode() == 2) {
+        VkMemoryBarrier mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER, NULL, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INPUT_ATTACHMENT_READ_BIT };
+        pvkCmdPipelineBarrier(c->cb, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              VK_DEPENDENCY_BY_REGION_BIT, 1, &mb, 0, NULL, 0, NULL);
+        return;
+    }
+    nvmtl_vk_cmd_barrier(c);
 }
 static VkDescriptorSet nvmtl_fetch_set_make(nvk_cmdbuf *c, uint32_t mask);
 static VkDescriptorSet nvmtl_fetch_set(nvk_cmdbuf *c, uint32_t mask)
@@ -3860,7 +3915,7 @@ static VkResult nvmtl_make_render_pass(const nvk_pipeline *p, uint32_t load, VkR
           VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, 0 },
         { 0, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
           VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_INPUT_ATTACHMENT_READ_BIT | VK_ACCESS_SHADER_READ_BIT, VK_DEPENDENCY_BY_REGION_BIT } };
-    VkRenderPassCreateInfo rpci = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, NULL, 0, n, atts, 1, &sp, fetch ? 3u : 2u, deps };
+    VkRenderPassCreateInfo rpci = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, NULL, 0, n, atts, 1, &sp, (fetch || nvmtl_selfdep_on()) ? 3u : 2u, deps };
     return pvkCreateRenderPass(g_dev, &rpci, NULL, out);
 }
 int nvmtl_vk_pipeline_create_blend(const void *vs, size_t vn, const void *fs, size_t fn, uint32_t vkfmt, uint32_t depthfmt, const nvk_blend_state *blend, nvk_pipeline *out)
@@ -5406,7 +5461,7 @@ static VkResult nvmtl_make_render_pass_shape(const nvk_pipeline *p, uint32_t loa
           VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, 0, 0 },
         { VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2, NULL, 0, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
           VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_INPUT_ATTACHMENT_READ_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0 } };
-    VkRenderPassCreateInfo2 rci = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2, NULL, 0, n, atts, 1, &sp, fetch ? 3u : 2u, deps2, 0, NULL };
+    VkRenderPassCreateInfo2 rci = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2, NULL, 0, n, atts, 1, &sp, (fetch || nvmtl_selfdep_on()) ? 3u : 2u, deps2, 0, NULL };
     return pvkCreateRenderPass2(g_dev, &rci, NULL, out);
 }
 typedef struct { uint64_t identity; uint32_t load, prm, dmode, smode; void *rp; } nvmtl_shape_rp;
@@ -5993,6 +6048,20 @@ static void nvmtl_subwho_note(const char *who, uint64_t ns)
         nvlog("vk: submit census over %llu submissions - %s", (unsigned long long)total, line);
     }
 }
+// GU605: what vkQueueSubmit costs (ANV's execbuffer through i915), and how long a submission spends in the plugin
+// before it (end of recording, fence, the managed-upload prologue, the submit lock); read and reset by
+// nvmtl_vk_queue_submit_stats for WindowServer's 5 s summary
+static _Atomic uint64_t g_qs_n, g_qs_ns, g_qs_max, g_qs_pre_ns;
+static void nvmtl_qs_note(uint64_t ns, uint64_t pre_ns)
+{
+    atomic_fetch_add(&g_qs_n, 1); atomic_fetch_add(&g_qs_ns, ns); atomic_fetch_add(&g_qs_pre_ns, pre_ns);
+    for (uint64_t m = atomic_load(&g_qs_max); ns > m && !atomic_compare_exchange_weak(&g_qs_max, &m, ns); ) ;
+}
+void nvmtl_vk_queue_submit_stats(uint64_t out[4])
+{
+    out[0] = atomic_exchange(&g_qs_n, 0); out[1] = atomic_exchange(&g_qs_ns, 0);
+    out[2] = atomic_exchange(&g_qs_max, 0); out[3] = atomic_exchange(&g_qs_pre_ns, 0);
+}
 int nvmtl_vk_submit_wait_at(nvk_cmdbuf *c, const char *who)
 {
     nvmtl_inflight f;
@@ -6061,7 +6130,9 @@ int nvmtl_vk_submit_begin_at(nvk_cmdbuf *c, nvmtl_inflight *f, const char *who)
     nvmtl_wit_control(wseq);
     const uint64_t sE = nvmtl_perf_now();
     if (pt[0]) { pt[1] = pt[0] + (sA - pt[0]) + (sD - sC); pt[2] = pt[1] + (sB - sA) + (sE - sD); pt[3] = pt[2] + (sC - sB); }
+    const uint64_t qs0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
     result = g_state == 1 ? pvkQueueSubmit(g_queue, 1, &si, fence) : VK_ERROR_DEVICE_LOST;
+    nvmtl_qs_note(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - qs0, qs0 - c->timing.host_before_ns);
     pthread_mutex_unlock(&nvmtl_submit_mutex);
     pt[4] = nvmtl_perf_now();
     g_cmd_submitted++;
@@ -6920,7 +6991,7 @@ int nvmtl_vk_copy_image_to_buffer_layer(nvk_queue *q, nvk_image *img, uint32_t x
 }
 
 void nvmtl_vk_cmd_draw_indirect(nvk_cmdbuf *c, nvk_buffer *b, size_t off)
-{ if (c->nobind) return; NVMTL_SEMU_DRAW(c, pvkCmdDrawIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0)); }
+{ if (c->nobind) return; nvmtl_self_tex_barrier(c); NVMTL_SEMU_DRAW(c, pvkCmdDrawIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0)); }
 int nvmtl_vk_cmd_draw_patches(nvk_cmdbuf *c, const nvk_pipeline *p, uint64_t fac, uint32_t istride, float scale, uint64_t cpx, uint64_t pix,
                               uint32_t start, uint32_t count, uint32_t instances, uint32_t baseInstance, nvk_buffer *ind, size_t indoff)
 {
@@ -6951,6 +7022,7 @@ void nvmtl_vk_cmd_draw_indexed_indirect(nvk_cmdbuf *c, nvk_buffer *idx, size_t i
     if (!nvmtl_index_range_ok(idx, idxOff)) return;
     pvkCmdBindIndexBuffer(c->cb, (VkBuffer)idx->buf, idxOff, is32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
     if (c->nobind) return;
+    nvmtl_self_tex_barrier(c);   /* GU605: as the direct draws */
     NVMTL_SEMU_DRAW(c, pvkCmdDrawIndexedIndirect(c->cb, (VkBuffer)b->buf, off, 1, 0));
 }
 void nvmtl_vk_cmd_dispatch_indirect(nvk_cmdbuf *c, nvk_pipeline *p, nvk_buffer *b, size_t off)

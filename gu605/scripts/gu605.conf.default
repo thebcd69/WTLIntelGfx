@@ -6,13 +6,28 @@ ECO_LEVEL=metal
 STANDARD_LEVEL=probe
 # zero-copy flip after a confirmed desktop (samwu07), WindowServer completion marks, AGDC K5 link answers
 FLIP=1
+# asynchronous flip (XeGfxAccel debug.nvaccel_xeflip_async): the swap waits for the GPU and the panel's latch on its own
+# thread, not on WindowServer's (240 Hz). 0 = synchronous. Off for later boots by itself if WindowServer restarts in
+# its first minute (file mark xeflip-async-off; delete that file to try again)
+FLIP_ASYNC=0
 WSMARK=1
 K5=1
+# DDC/CI (hardware brightness of the external monitor, BetterDisplay's DDC mode) through the Intel framebuffer:
+# 1 = on, 0 = off (applied at every boot by gu605-auto.sh; at once by hand: sudo tools/xeddcprobe enable 0)
+DDC=1
 # copy each run's summary to <EFI>/GU605/ (readable from Windows); 0 = never mount the EFI
 EFI_LOG=1
+# display path (docs/GU605-DISPLAY-DESIGN.md, branch gu605-display): adopt = keep the firmware's pipe (gu605-mtl);
+#   kms = Linux i915 owns the display (Eco): 240 Hz, the left USB-C port, native brightness. Falls back to adopt by
+#   itself (takeover preflight, kms-failed after a failed stage 4, boot-arg -xegfxnokms).
+DISPLAY=adopt
+# internal panel refresh after the KMS takeover (Hz; empty or 0 = leave the firmware's)
+PANEL_HZ=240
 # desktop step when someone is already logged in (gu605-desktop.sh): auto = an automatic login left idle restarts
 # WindowServer after a 20 s notice, else at the next logout | logout = always at the next logout | skip = never
-DESKTOP_LOGGED_IN=auto
+# Default logout: on the GU605 (2026-11-05 13:11) a WindowServer restart under a live session gave a black screen
+# (power button); auto stays opt-in until it ends the session first.
+DESKTOP_LOGGED_IN=logout
 DESKTOP_AUTOLOGIN_S=150
 DESKTOP_IDLE_S=60
 DESKTOP_WAIT_MIN=120

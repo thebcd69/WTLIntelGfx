@@ -518,11 +518,18 @@ bail_out:
  * allocator after it. Stage 2 fills xg_boot_fb_* only when pipe A was lit.
  */
 extern unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
+extern int xg_kms_on;
 
 static resource_size_t xg_stolen_start(struct drm_i915_private *i915, struct intel_memory_region *mem)
 {
 	resource_size_t base = i915->dsm.stolen.start, phys, end;
 
+	/* GU605 display path: i915 takes the console image over itself (i915_gem_object_create_region_at in
+	 * intel_plane_initial.c), which needs that range inside the allocator */
+	if (xg_kms_on == 1) {
+		drm_info(&i915->drm, "xegfx: KMS: the stolen allocator covers the boot framebuffer, i915 takes it over\n");
+		return 0;
+	}
 	if (xg_boot_fb_size == 0)
 		return 0;
 	/* MTL and later put GSM-relative offsets in GGTT entries (the region starts at 8 MiB); the firmware may not */

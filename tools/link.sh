@@ -18,7 +18,7 @@ for cpp in "$ROOT"/shim/src/xnu/*.cpp; do
 done
 # firmware linked into the binary, so no daemon round trip is needed (empty table without linux-firmware)
 FW=${XEGFX_FW:-$HOME/src/xe-src/linux-firmware}
-FWS="mtl_guc_70.bin"
+FWS="mtl_guc_70.bin mtl_dmc.bin"   # DMC: GU605 display path (i915 owns the display)
 { printf '.section __DATA,__const\n.p2align 3\n.globl _xg_fw_embedded\n_xg_fw_embedded:\n'
   i=0; for f in $FWS; do [ -f "$FW/$f" ] || continue
     printf '.quad n%d, d%d, e%d - d%d\n' $i $i $i $i; i=$((i+1)); done
@@ -38,6 +38,7 @@ cp "$ROOT/kext/Info.plist" "$B/Info.plist"
 if [ -f "$FW/mtl_guc_70.bin" ]; then
   mkdir -p "$B/Resources"
   cp "$FW/mtl_guc_70.bin" "$FW/LICENSE.i915" "$B/Resources/"
+  [ -f "$FW/mtl_dmc.bin" ] && cp "$FW/mtl_dmc.bin" "$B/Resources/"
 fi
 codesign -s - -f "$ROOT/out/XeGfx.kext" >/dev/null 2>&1 || true
 echo "XeGfx.kext $(stat -f %z "$B/MacOS/XeGfx") B"

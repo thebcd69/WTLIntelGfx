@@ -12,6 +12,8 @@
 #import <mach/mach.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>   /* chmod: nvmtl_log_path */
+#include <unistd.h>
 #include <string.h>
 #include <syslog.h>
 #include <unistd.h>
@@ -98,7 +100,15 @@ const char *nvmtl_log_path(void) {
         decided = 1;
         FILE *f = fopen("/tmp/nvmtl.log", "a");
         if (f) { fclose(f); snprintf(path, sizeof path, "/tmp/nvmtl.log"); }
-        else { const char *t = getenv("TMPDIR"); snprintf(path, sizeof path, "%s/nvmtl.log", (t && *t) ? t : "/private/tmp"); }
+        else {
+            // GU605: /tmp/nvmtl.log belongs to whoever made it first (a user's test process), and WindowServer
+            // (_windowserver) then logged into its private TMPDIR, readable by root only. A file of its own instead.
+            const char *pn = getprogname();
+            snprintf(path, sizeof path, "/tmp/nvmtl-%s-%u.log", pn && *pn ? pn : "proc", (unsigned)getuid());
+            f = fopen(path, "a");
+            if (f) { fclose(f); chmod(path, 0644); }
+            else { const char *t = getenv("TMPDIR"); snprintf(path, sizeof path, "%s/nvmtl.log", (t && *t) ? t : "/private/tmp"); }
+        }
     }
     return path;
 }

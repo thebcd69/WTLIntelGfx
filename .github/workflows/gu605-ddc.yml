@@ -1,0 +1,26 @@
+# gu605-ddc: quick check on macos-26 (macos-14 retired, macos-15 jobs sat queued, November 2026): builds XeGfxIntelFB.kext with
+# Apple clang (-Werror, Kernel.framework headers) so ddc.inc is compiled for real. The full package stays gu605.yml.
+name: gu605-ddc quick
+on:
+  push:
+    branches: [gu605-ddc]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  intelfb:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: XeGfxIntelFB
+        run: |
+          set -euo pipefail
+          X=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
+          [ -n "$X" ] && sudo xcode-select -s "$X"
+          xcodebuild -version
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path) OUTROOT=$PWD/out bash build/build_xegfxintelfb.sh
+          nm -u out/XeGfxIntelFB/XeGfxIntelFB.kext/Contents/MacOS/XeGfxIntelFB | sort > out/undefined.txt; wc -l < out/undefined.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XeGfxIntelFB-gu605-ddc
+          path: out/

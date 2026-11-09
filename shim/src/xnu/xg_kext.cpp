@@ -76,7 +76,34 @@ extern unsigned long long xg_spin_max_us;
 extern unsigned int xg_spin_long;
 /* the firmware's console image, when pipe A scans it out at probe; i915's stolen allocator starts after it */
 unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
+/*
+ * GU605 branch, display path (docs/GU605-DISPLAY-DESIGN.md): -1 not a GU605 (the overlay keeps its tunables), 0 GU605
+ * with i915's display code off (the adopt path), 1 GU605 with i915 owning the display (KMS). Set before stage 4 and
+ * read by the overlay's display probe and stolen allocator.
+ */
+int xg_kms_on = -1;
+/* xkpi/src/i915/xg_kms.h */
+struct xg_kms_mode {
+	unsigned int w, h, clock_khz, htotal, hss, hse, vtotal, vss, vse, flags, mhz, preferred;
+};
+int xg_kms_dump(char *buf, unsigned long len);
+int xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, int test, char *msg, unsigned long msglen);
+int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
+int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
+int xg_kms_client_init(void);
+int xg_kms_edid(const char *name, unsigned char *buf, int len);
+struct xg_kms_i2c {
+	unsigned int addr, wlen, rlen;
+	unsigned char *wbuf, *rbuf;
+	int rdone;
+};
+int xg_kms_i2c(const char *name, struct xg_kms_i2c *x);
+extern void (*xg_kms_notify)(void);
+extern unsigned int xg_kms_hotplugs;
 }
+static bool xg_kms_ready(void);
+static int xg_kms_call(uintptr_t op, void *a, void *b, void *c);
+static void xg_kms_after_stage4(void);
 
 class XeGfxResident : public IOService {
 	OSDeclareDefaultStructors(XeGfxResident)
@@ -133,6 +160,9 @@ xg_env_has(const char *kv)
 }
 static IOLock *gStageLock;
 static uint64_t gSurfPte;
+static bool gKmsPre;		/* stage 2: the takeover conditions i915 needs all held */
+static char gKmsWhy[96];	/* why not, or "ok" */
+static void xg_kms_preflight(OSDictionary *d, volatile uint32_t *r, uint16_t ggc);
 static bool gPipeLit;	/* pipe A was scanning out at probe time (Hybrid); in Discrete mode the NVIDIA GPU has the panel */
 static char gLog[256 * 1024];	/* last 256 KiB of the shim's console output, for sysctl debug.xegfx_log */
 static size_t gLogLen;
@@ -157,6 +187,10 @@ XeGfxResident::callPlatformFunction(const OSSymbol *name, bool wait, void *p1, v
 		*(int *)p4 = xg_fd_remote_ioctl((int)(uintptr_t)p1, (unsigned long)p2, (unsigned long long)(uintptr_t)p3);
 		return kIOReturnSuccess;
 	}
+	/* "xgKms" (op, a, b, c): the display path for XeGfxIntelFB (xg_kms_call); kIOReturnNotReady without it */
+	if (name && name->isEqualTo("xgKms"))
+		return xg_kms_ready() ? (xg_kms_call((uintptr_t)p1, p2, p3, p4) == 0 ? kIOReturnSuccess : kIOReturnError) :
+		    kIOReturnNotReady;
 	/* "xgTrace" (const char *line): XeGfxAccel's state, stored with the console trace (thread context only) */
 	if (name && name->isEqualTo("xgTrace") && p1 && gLogLock) {
 		IOInterruptState is = IOSimpleLockLockDisableInterrupt(gLogLock);
@@ -385,6 +419,8 @@ xg_probe(void)
 					xg_boot_fb_size = (uint64_t)(r[0x70188 / 4] & 0x7ff) * 64 * ((r[0x70190 / 4] >> 16) + 1);
 					xg_put(d, "boot-fb-size", xg_boot_fb_size, 64);
 				}
+				if (xg_is_gu605(gpu))
+					xg_kms_preflight(d, r, gpu->configRead16(0x50));
 			}
 			mm->release();
 		} else {
@@ -419,6 +455,141 @@ out:
 
 static uint32_t gBootSurf;	/* PLANE_SURF_1_A after i915 ran: the boot surface's GGTT offset */
 
+/*
+ * GU605 display path: i915 can take the firmware's image over (intel_plane_initial.c, MTL: stolen-as-LMEM) only when
+ * pipe A scans a linear XRGB8888 surface whose GGTT entry is valid, has the LM bit and points inside stolen
+ * ([8 MiB, 8 MiB + GMS) in MTL's GSM-relative PTE addresses). When one of these does not hold, i915 would disable the
+ * plane at stage 4 (a black panel), so the display path is refused and the adopt path runs, in the same boot.
+ */
+static void
+xg_kms_preflight(OSDictionary *d, volatile uint32_t *r, uint16_t ggc)
+{
+	uint32_t ctl = r[0x70180 / 4], gms = (ggc >> 8) & 0xff, dsm_mb = 0;
+	uint64_t addr = gSurfPte & 0x3ffffffff000ull;
+	uint32_t f0 = r[0x70040 / 4], f1;
+
+	if (gms <= 4)
+		dsm_mb = gms * 32;
+	else if (gms >= 0xf0 && gms <= 0xfe)
+		dsm_mb = (gms - 0xf0 + 1) * 4;
+	IOSleep(40);
+	f1 = r[0x70040 / 4];
+	gKmsPre = false;
+	if (!gPipeLit)
+		strlcpy(gKmsWhy, "pipe A off (another GPU has the panel)", sizeof(gKmsWhy));
+	else if (f1 == f0)
+		strlcpy(gKmsWhy, "pipe A frame counter stopped", sizeof(gKmsWhy));
+	else if (!(ctl & 0x80000000u))
+		strlcpy(gKmsWhy, "plane 1A off", sizeof(gKmsWhy));
+	else if (ctl & 0x1c00u)
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "plane 1A tiled (ctl 0x%x)", ctl);
+	else if (((ctl >> 23) & 0x1f) != 8)
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "plane 1A format %u, not XRGB8888", (ctl >> 23) & 0x1f);
+	else if ((ggc & 0xc0) != 0xc0 || dsm_mb == 0)
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "GGC 0x%x: no valid GMS/GGMS", ggc);
+	else if (!(gSurfPte & 1))
+		strlcpy(gKmsWhy, "boot surface GGTT entry invalid", sizeof(gKmsWhy));
+	else if (!(gSurfPte & 2))
+		strlcpy(gKmsWhy, "boot surface GGTT entry without the LM bit", sizeof(gKmsWhy));
+	else if (addr < (8ull << 20) || addr + xg_boot_fb_size > (8ull << 20) + ((uint64_t)dsm_mb << 20))
+		snprintf(gKmsWhy, sizeof(gKmsWhy), "boot surface 0x%llx+0x%llx outside stolen (%u MiB)",
+		    (unsigned long long)addr, (unsigned long long)xg_boot_fb_size, dsm_mb);
+	else {
+		gKmsPre = true;
+		strlcpy(gKmsWhy, "ok", sizeof(gKmsWhy));
+	}
+	xg_put(d, "kms-dsm-mb", dsm_mb);
+	if (OSString *s = OSString::withCString(gKmsWhy)) {
+		d->setObject("kms-preflight", s);
+		s->release();
+	}
+}
+
+/* stage 4 on a GU605: whether i915's display code runs this time (xg_kms_on), recorded as XeGfxKms */
+static void
+xg_env_default(const char *key, const char *val)
+{
+	char kv[96];
+
+	snprintf(kv, sizeof(kv), "%s=", key);
+	if (xg_env_has(kv))
+		return;
+	snprintf(kv, sizeof(kv), " %s=%s", key, val);
+	strlcat(xg_env, kv, sizeof(xg_env));
+}
+
+/* key=val, replacing any earlier value (the first match wins in xg_env_lookup) */
+static void
+xg_env_force(const char *key, const char *val)
+{
+	char out[sizeof(xg_env)], kv[96];
+	size_t kl = strlen(key), o = 0;
+	const char *p = xg_env;
+
+	while (*p) {
+		while (*p == ' ')
+			p++;
+		const char *t = p;
+		while (*p && *p != ' ')
+			p++;
+		if ((size_t)(p - t) > kl && strncmp(t, key, kl) == 0 && t[kl] == '=')
+			continue;	/* dropped */
+		if (p > t && o + (size_t)(p - t) + 2 < sizeof(out)) {
+			if (o)
+				out[o++] = ' ';
+			memcpy(out + o, t, (size_t)(p - t));
+			o += (size_t)(p - t);
+		}
+	}
+	out[o] = 0;
+	snprintf(kv, sizeof(kv), "%s%s=%s", o ? " " : "", key, val);
+	strlcat(out, kv, sizeof(out));
+	strlcpy(xg_env, out, sizeof(xg_env));
+}
+
+static void
+xg_kms_decide(void)
+{
+	IOPCIDevice *g = xg_find_igpu();
+	bool gu = xg_is_gu605(g);
+	const char *why = nullptr;
+	OSDictionary *d = OSDictionary::withCapacity(4);
+
+	OSSafeReleaseNULL(g);
+	if (!gu) {
+		xg_kms_on = -1;
+		return;
+	}
+	if (!xg_env_has("xegfx.kms=1"))
+		why = "not asked for (DISPLAY=kms in gu605.conf)";
+	else if (PE_parse_boot_argn("-xegfxnokms", nullptr, 0))
+		why = "boot-arg -xegfxnokms";
+	else if (!gKmsPre)
+		why = gKmsWhy[0] ? gKmsWhy : "stage 2 did not run";
+	xg_kms_on = why == nullptr ? 1 : 0;
+	if (xg_kms_on == 1) {
+		/* xeflip and the accelerator write the scanout behind i915's back: nothing may cache or skip frames */
+		/* _start's default env turns the display off by disable_display=1: that one must go */
+		xg_env_force("compat.linuxkpi.i915_disable_display", "0");
+		xg_env_force("compat.linuxkpi.i915_xegfx_no_display", "0");
+		xg_env_default("compat.linuxkpi.i915_enable_psr", "0");
+		xg_env_default("compat.linuxkpi.i915_enable_fbc", "0");
+		xg_env_default("compat.linuxkpi.i915_enable_dc", "0");
+	}
+	IOLog("XeGfx: display path: %s%s%s\n", xg_kms_on == 1 ? "i915 KMS" : "adopt (i915 display off)",
+	    why ? " -- " : "", why ? why : "");
+	if (d && gResident) {
+		OSString *s = OSString::withCString(why ? why : "ok");
+		xg_put(d, "on", (uint32_t)xg_kms_on, 8);
+		if (s) {
+			d->setObject("why", s);
+			s->release();
+		}
+		gResident->setProperty("XeGfxKms", d);
+	}
+	OSSafeReleaseNULL(d);
+}
+
 /* after i915 has run: the panel must still scan out the boot surface through the same GGTT entry, and pipe A must
  * still count frames; otherwise the desktop is black even though WindowServer looks fine */
 static int
@@ -447,6 +618,14 @@ xg_display_check(void)
 		xg_put(d, "ggtt-pte-surf", pte, 64);
 		xg_put(d, "frmcount-delta", f1 - f0);
 		rc = (gSurfPte && pte != gSurfPte) ? -71 : (f1 == f0 ? -70 : 1);
+		/* KMS: i915 rebinds the surface (MTL: at GGTT 0); the panel must still show the same stolen pages */
+		if (xg_kms_on == 1) {
+			uint32_t ctl = r[0x70180 / 4];
+			rc = !(ctl & 0x80000000u) ? -72 :
+			    ((pte & 0x3ffffffff000ull) != (gSurfPte & 0x3ffffffff000ull) || !(pte & 1)) ? -73 : (f1 == f0 ? -70 : 1);
+			xg_put(d, "kms", 1, 8);
+			xg_put(d, "plane-ctl-1-a", ctl);
+		}
 		xg_put(d, "result", (uint32_t)rc);
 		if (gResident)
 			gResident->setProperty("XeGfxPost", d);
@@ -590,6 +769,8 @@ xg_run_stage(int s)
 	if (s == 2) {
 		rc = xg_probe();
 	} else {
+		if (s == 4)
+			xg_kms_decide();	/* before i915 probes: its display code reads xg_kms_on */
 		xg_start_stage(s);
 		if (s == 1 && xg_vm_vmap_selftest() != 0)
 			rc = -12;	/* the vmap path i915 needs from its first GGTT setup on (N-221) */
@@ -610,7 +791,10 @@ xg_run_stage(int s)
 				xg_i915_map_init();
 				rc = xg_gt_check();
 			}
-			if (rc == 1 && gPipeLit && gBootSurf && xg_boot_fb_size) {
+			if (rc == 1 && xg_kms_on == 1)
+				xg_kms_after_stage4();
+			/* KMS: i915 holds the surface itself (intel_plane_initial), nothing to reserve or move */
+			if (rc == 1 && xg_kms_on != 1 && gPipeLit && gBootSurf && xg_boot_fb_size) {
 				int err = xg_i915_reserve_bootfb(gBootSurf, xg_boot_fb_size);
 
 				IOLog("XeGfx: boot surface GGTT 0x%x + %llu reserved: %d\n", gBootSurf, xg_boot_fb_size, err);
@@ -837,12 +1021,238 @@ SYSCTL_PROC(_debug, OID_AUTO, xegfx_log, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_L
 SYSCTL_STRING(_debug, OID_AUTO, xegfx_env, CTLFLAG_RW | CTLFLAG_LOCKED, xg_env, sizeof(xg_env),
     "tunables for the stages, name=value pairs");
 
+/*
+ * GU605 display path (docs/GU605-DISPLAY-DESIGN.md). Every entry point needs stage 4 passed with i915 owning the
+ * display, and none runs while a stage does; gKmsLock serialises them.
+ */
+static IOLock *gKmsLock;
+static char gKmsMsg[160];
+static thread_call_t gKmsNotifyCall;
+static unsigned gKmsNotified;
+
+static bool
+xg_kms_ready(void)
+{
+	return xg_kms_on == 1 && gStage >= 4 && gResult[4] == 1 && !gRunning && gKmsLock;
+}
+
+/* i915's hotplug work: publish the count; XeGfxIntelFB watches XeGfxKmsHotplugs (thread call, never i915's thread) */
+static void
+xg_kms_notify_fire(thread_call_param_t, thread_call_param_t)
+{
+	if (gResident)
+		gResident->setProperty("XeGfxKmsHotplugs", (unsigned long long)xg_kms_hotplugs, 32);
+	if (gResident)
+		gResident->messageClients(kIOMessageServicePropertyChange);
+	gKmsNotified++;
+}
+
+static void
+xg_kms_notify_cb(void)
+{
+	if (gKmsNotifyCall)
+		thread_call_enter(gKmsNotifyCall);
+}
+
+static void
+xg_kms_after_stage4(void)
+{
+	int err;
+
+	xg_kms_notify = xg_kms_notify_cb;
+	err = xg_kms_client_init();
+	IOLog("XeGfx: display path up, hotplug client %d\n", err);
+	if (gResident) {
+		gResident->setProperty("XeGfxKmsClient", (unsigned long long)(uint32_t)err, 32);
+		gResident->setProperty("XeGfxKmsReady", true);
+	}
+}
+
+/* "NAME", "NAME HZ", "NAME WxH", "NAME WxH@HZ", each optionally followed by " test"; HZ may be mHz (> 1000) */
+static int
+xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h, unsigned *mhz, int *test)
+{
+	const char *p = in;
+	size_t n = 0;
+
+	*w = *h = *mhz = 0;
+	*test = 0;
+	while (*p == ' ')
+		p++;
+	while (*p && *p != ' ' && n + 1 < nl)
+		name[n++] = *p++;
+	name[n] = 0;
+	if (!n)
+		return EINVAL;
+	while (*p) {
+		while (*p == ' ')
+			p++;
+		if (strncmp(p, "test", 4) == 0) {
+			*test = 1;
+			p += 4;
+			continue;
+		}
+		if (!*p)
+			break;
+		if (*p < '0' || *p > '9')
+			return EINVAL;
+		unsigned long a = strtoul(p, (char **)&p, 10);
+		if (*p == 'x') {
+			*w = (unsigned)a;
+			*h = (unsigned)strtoul(p + 1, (char **)&p, 10);
+			if (*p == '@')
+				a = strtoul(p + 1, (char **)&p, 10);
+			else
+				a = 0;
+		}
+		*mhz = a > 1000 ? (unsigned)a : (unsigned)a * 1000;
+		while (*p && *p != ' ')
+			p++;
+	}
+	return 0;
+}
+
+static int
+xg_kms_call(uintptr_t op, void *a, void *b, void *c)
+{
+	int ret = -EINVAL;
+
+	IOLockLock(gKmsLock);
+	switch (op) {
+	case 1: {	/* set: a = const char *name, b = uint32_t[4] {w, h, mHz, test}, c = char[128] message or NULL */
+		const uint32_t *v = (const uint32_t *)b;
+		char m[128];
+		if (a && v)
+			ret = xg_kms_set((const char *)a, v[0], v[1], v[2], (int)v[3], m, sizeof(m));
+		else
+			strlcpy(m, "bad arguments", sizeof(m));
+		if (a && v) {
+			if (c)
+				strlcpy((char *)c, m, 128);
+			IOLog("XeGfx: kms set (fb): %s\n", m);
+		}
+		break;
+	}
+	case 2:		/* backlight: a = (intptr_t) per mille or -1, b = int *result (per mille or -errno) */
+		ret = xg_kms_backlight((int)(intptr_t)a, gKmsMsg, sizeof(gKmsMsg));
+		if (b)
+			*(int *)b = ret;
+		ret = ret < 0 ? ret : 0;
+		break;
+	case 3: {	/* modes: a = const char *name, b = struct xg_kms_mode[32], c = int[3] {count out, connected, -} + cur */
+		int *io = (int *)c, conn = 0;
+		struct xg_kms_mode *cur = (struct xg_kms_mode *)((char *)b + 32 * sizeof(struct xg_kms_mode));
+		if (a && b && io) {
+			ret = xg_kms_modes((const char *)a, (struct xg_kms_mode *)b, 32, &conn, cur);
+			io[0] = ret;
+			io[1] = conn;
+			ret = ret < 0 ? ret : 0;
+		}
+		break;
+	}
+	case 5:		/* EDID: a = const char *name, b = uint8_t[1024], c = int *length out */
+		if (a && b && c) {
+			ret = xg_kms_edid((const char *)a, (unsigned char *)b, 1024);
+			*(int *)c = ret;
+			ret = ret < 0 ? ret : 0;
+		}
+		break;
+	case 6:		/* DDC (gu605-ddc): a = const char *name, b = struct xg_kms_i2c *, c = int *result (0 or -errno) */
+		if (a && b) {
+			ret = xg_kms_i2c((const char *)a, (struct xg_kms_i2c *)b);
+			if (c)
+				*(int *)c = ret;
+		}
+		break;
+	case 4:		/* hotplug count: a = unsigned * */
+		if (a) {
+			*(unsigned *)a = xg_kms_hotplugs;
+			ret = 0;
+		}
+		break;
+	}
+	IOLockUnlock(gKmsLock);
+	return ret;
+}
+
+static int
+xegfx_kms_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
+{
+	static char buf[48 * 1024];
+	int err;
+
+	if (!gKmsLock)
+		return ENODEV;
+	IOLockLock(gKmsLock);
+	if (xg_kms_ready())
+		xg_kms_dump(buf, sizeof(buf));
+	else
+		snprintf(buf, sizeof(buf), "display path not up: xg_kms_on %d stage %d result4 %d running %d why %s\n", xg_kms_on,
+		    gStage, gResult[4], gRunning, gKmsWhy[0] ? gKmsWhy : "-");
+	err = SYSCTL_OUT(req, buf, strlen(buf) + 1);
+	IOLockUnlock(gKmsLock);
+	return err;
+}
+
+static int
+xegfx_kms_set_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
+{
+	char in[96] = { 0 }, name[32];
+	unsigned w, h, mhz;
+	int test, err;
+
+	if (!gKmsLock)
+		return ENODEV;
+	if (!req->newptr)
+		return SYSCTL_OUT(req, gKmsMsg, strlen(gKmsMsg) + 1);
+	if (req->newlen >= sizeof(in))
+		return EINVAL;
+	if ((err = SYSCTL_IN(req, in, req->newlen)) != 0)
+		return err;
+	if (xg_kms_parse_set(in, name, sizeof(name), &w, &h, &mhz, &test) != 0)
+		return EINVAL;
+	if (!xg_kms_ready())
+		return ENXIO;
+	IOLockLock(gKmsLock);
+	err = xg_kms_set(name, w, h, mhz, test, gKmsMsg, sizeof(gKmsMsg));
+	IOLockUnlock(gKmsLock);
+	IOLog("XeGfx: kms set \"%s\": %s\n", in, gKmsMsg);
+	return err < 0 ? -err : 0;
+}
+
+static int
+xegfx_kms_bl_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
+{
+	int v = -1, err, r;
+
+	if (!xg_kms_ready())
+		return ENXIO;
+	err = sysctl_handle_int(nullptr, &v, 0, req);
+	if (err)
+		return err;
+	if (req->newptr && (v < 0 || v > 1000))
+		return EINVAL;
+	IOLockLock(gKmsLock);
+	r = xg_kms_backlight(req->newptr ? v : -1, gKmsMsg, sizeof(gKmsMsg));
+	IOLockUnlock(gKmsLock);
+	IOLog("XeGfx: kms backlight %d: %s\n", req->newptr ? v : -1, gKmsMsg);
+	return r < 0 ? -r : 0;
+}
+
+SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_sysctl, "A",
+    "GU605 display path: connectors, validated modes, link, DSC, backlight");
+SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms_set, CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_set_sysctl,
+    "A", "GU605 display path: \"NAME [HZ|WxH[@HZ]] [test]\"; reads the last result");
+SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms_bl, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_bl_sysctl, "I",
+    "GU605 display path: eDP brightness, per mille (write); the result is in debug.xegfx_kms_set");
+
 static struct sysctl_oid *const gOids[] = {
 	&sysctl__debug_xegfx_stage, &sysctl__debug_xegfx_results, &sysctl__debug_xegfx_fd, &sysctl__debug_xegfx_mem, &sysctl__debug_xegfx_running,
 	&sysctl__debug_xegfx_progress, &sysctl__debug_xegfx_wdog, &sysctl__debug_xegfx_env, &sysctl__debug_xegfx_log,
 	&sysctl__debug_xegfx_hold,
 	&sysctl__debug_xegfx_trace,
 	&sysctl__debug_xegfx_spin,
+	&sysctl__debug_xegfx_kms, &sysctl__debug_xegfx_kms_set, &sysctl__debug_xegfx_kms_bl,
 };
 
 /* Linux's struct va_format, the argument of "%pV" */
@@ -1059,7 +1469,9 @@ _start(kmod_info_t *ki, void *)
 	gWdogCall = thread_call_allocate(xg_wdog_fire, nullptr);
 	gHoldCall = thread_call_allocate(xg_hold_fire, nullptr);
 	gTraceCall = thread_call_allocate(xg_trace_fire, nullptr);
-	if (!gStageLock || !gWdogCall || !gHoldCall || !gTraceCall || !gLogLock || !gSnapLock)
+	gKmsLock = IOLockAlloc();
+	gKmsNotifyCall = thread_call_allocate(xg_kms_notify_fire, nullptr);
+	if (!gStageLock || !gWdogCall || !gHoldCall || !gTraceCall || !gLogLock || !gSnapLock || !gKmsLock || !gKmsNotifyCall)
 		return KERN_FAILURE;
 	/*
 	 * i915 stays off the display until XeGfx owns it, and gets the GuC explicitly: drm-kmod leaves enable_guc at -1 on
@@ -1090,5 +1502,8 @@ _stop(kmod_info_t *, void *)
 	IOLockFree(gStageLock);
 	IOSimpleLockFree(gLogLock);
 	IOLockFree(gSnapLock);
+	thread_call_cancel(gKmsNotifyCall);	/* stage 0: i915 never ran, nothing can call it */
+	thread_call_free(gKmsNotifyCall);
+	IOLockFree(gKmsLock);
 	return KERN_SUCCESS;
 }

@@ -16,6 +16,10 @@
 #include <IOKit/IOLocks.h>
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/graphics/IODisplay.h>
+#include <IOKit/i2c/IOI2CInterface.h>   // gu605-ddc (ddc.inc)
+#include <IOKit/IOUserClient.h>         // gu605-ddc: clientHasPrivilege (XeGfxDdcEnable)
+#include <kern/task.h>
+#include <sys/errno.h>
 
 #define XIFBLOG(fmt, ...) IOLog("XeGfxIntelFB: " fmt "\n", ##__VA_ARGS__)
 
@@ -212,61 +216,8 @@ static bool xifbAddConsoleRange(IOService *pci)
 
 
 #include "gu605.h"
-// GU605: the brightness slider and keys through AppleBacklightDisplay. IODisplay calls doIntegerSet with the framebuffer
-// lock held, so the DPCD write runs from a thread call (as NullMoth's NMIntelBacklight does for the PWM).
-class XeGfxIntelBacklight : public IODisplayParameterHandler {
-    OSDeclareDefaultStructors(XeGfxIntelBacklight)
-    XifbBacklight *fBl = nullptr;
-    thread_call_t fApply = nullptr;
-    volatile SInt32 fPending = -1;
-    SInt32 fLevel = 100;
-    static void applyFire(thread_call_param_t p, thread_call_param_t) {
-        XeGfxIntelBacklight *me = (XeGfxIntelBacklight *)p;
-        SInt32 v;
-        do { v = me->fPending; } while (!OSCompareAndSwap((UInt32)v, (UInt32)-1, (volatile UInt32 *)&me->fPending));
-        if (v < 0) return;
-        if (xifbBacklightSet(me->fBl, (uint32_t)v)) me->fLevel = v;
-        else XIFBLOG("gu605 backlight: setting %d%% did not reach the panel", (int)v);
-    }
-public:
-    static XeGfxIntelBacklight *with(XifbBacklight *bl) {
-        XeGfxIntelBacklight *h = OSTypeAlloc(XeGfxIntelBacklight);
-        if (!h || !h->init()) { OSSafeReleaseNULL(h); return nullptr; }
-        h->fBl = bl; h->fLevel = bl->startPercent < 5 ? 5 : bl->startPercent;
-        h->fApply = thread_call_allocate(applyFire, h);
-        if (!h->fApply) { h->release(); return nullptr; }
-        return h;
-    }
-    bool setDisplay(IODisplay *display) override {
-        if (!display) return false;
-        OSObject *old = display->copyProperty(gIODisplayParametersKey);
-        OSDictionary *cur = OSDynamicCast(OSDictionary, old);
-        OSDictionary *params = cur ? OSDictionary::withDictionary(cur) : OSDictionary::withCapacity(2);
-        OSSafeReleaseNULL(old);
-        if (!params) return false;
-        IODisplay::addParameter(params, gIODisplayBrightnessKey, 0, 100);
-        IODisplay::setParameter(params, gIODisplayBrightnessKey, fLevel);
-        IODisplay::addParameter(params, gIODisplayLinearBrightnessKey, 0, 100);
-        IODisplay::setParameter(params, gIODisplayLinearBrightnessKey, fLevel);
-        display->setProperty(gIODisplayParametersKey, params);
-        params->release();
-        XIFBLOG("gu605 backlight: brightness parameters on %s at %d%%", display->getName(), (int)fLevel);
-        return true;
-    }
-    bool doIntegerSet(OSDictionary *, const OSSymbol *name, UInt32 value) override {
-        if (name != gIODisplayBrightnessKey && name != gIODisplayLinearBrightnessKey) return false;
-        fPending = value > 100 ? 100 : (SInt32)value;
-        thread_call_enter(fApply);
-        return true;
-    }
-    bool doDataSet(const OSSymbol *, OSData *) override { return false; }
-    bool doUpdate() override { return true; }
-    void free() override {
-        if (fApply) { thread_call_cancel(fApply); while (!thread_call_free(fApply)) { thread_call_cancel(fApply); IOSleep(1); } fApply = nullptr; }
-        IODisplayParameterHandler::free();
-    }
-};
-OSDefineMetaClassAndStructors(XeGfxIntelBacklight, IODisplayParameterHandler)
+// GU605: the brightness slider and keys through AppleBacklightDisplay (adapted from NullMoth, PolyForm-NC)
+#include "nm_backlight.h"
 
 
 // Hardware cursor on pipe A's cursor plane. Without one IOFramebuffer draws a software cursor, every move damages a
@@ -456,6 +407,7 @@ public:
                     else { fEdidLen = 0; XIFBLOG("EDID: AUX A read failed, the display stays unnamed"); }
                     uint32_t meas = xifbMeasureHz();
                     fHz16 = fEdidLen ? xifbSnapHz(fEdid, fEdidLen, meas) : meas;
+                    fStartHz16 = fHz16;   // the firmware's refresh: the boot mode's, also after i915 changed it
                     XIFBLOG("refresh measured %u.%02u Hz, reported %u.%02u Hz", meas >> 16, ((meas & 0xffff) * 100) >> 16,
                             fHz16 >> 16, ((fHz16 & 0xffff) * 100) >> 16);
                     gRegs = nullptr; fMmio = m; fR = (volatile uint32_t *)m->getVirtualAddress();
@@ -473,17 +425,21 @@ public:
         // samwu07's bootvram (console range, IOFBDependentID/Index, NVRMTiming): 7D55 only on this branch
         bool vram = fGu605 && OSDynamicCast(IOPCIDevice, provider) && xifbAddConsoleRange(provider);
         // IOFramebuffer::open looks for a child named "backlight" (AppleBacklightDisplay), so it is attached first
-        if (fGu605 && fBl.kind != XIFB_BL_NONE && (fBacklight = XeGfxIntelBacklight::with(&fBl))) {
+        // GU605: also without a DPCD backlight, as i915 (display path) may drive the panel's later
+        if (fGu605 && (fBacklight = XeGfxIntelBacklight::with(&fBl))) {
             fBacklight->setName("backlight");
             if (fBacklight->attach(this)) fBacklight->registerService(kIOServiceSynchronous);
             else { OSSafeReleaseNULL(fBacklight); XIFBLOG("gu605 backlight: handler attach failed"); }
         }
         startStep(getProperty(gIONameMatchedKey) ? "IONDRVFramebuffer::start (name matched)"
                                                   : "IONDRVFramebuffer::start (NOT name matched: will return false)");
+        ddcPublish();   // gu605-ddc: before IOFramebuffer::open builds the I2C nubs
         bool ok = IONDRVFramebuffer::start(provider);
         startStep(ok ? "started" : (getProperty(gIONameMatchedKey) ? "FAILED in IONDRVFramebuffer::start (name matched)"
                                                                    : "FAILED: not matched by name (IONameMatch display missing)"));
         if (!ok && fBacklight) { fBacklight->detach(this); OSSafeReleaseNULL(fBacklight); }
+        // display path: watch for i915 taking the display over (also if IOFramebuffer never asks for connect interrupts)
+        { int nk = 0; if (ok && fGu605 && !PE_parse_boot_argn("-xeintelfbnokms", &nk, sizeof nk)) kmsWatchStart(); }
         // the name is still the class name here; it becomes ".Display_boot" when the boot NDRV opens it
         XIFBLOG("IONDRVFramebuffer start %s, name %s", ok ? "ok" : "FAILED", getName());
         // a GPU's own framebuffer driver names its GPU and its slot; IONDRVFramebuffer does not, and XeGfxAGDC left
@@ -518,6 +474,7 @@ public:
     volatile bool fVblEnabled = false, fVblStop = false; thread_call_t fVblCall = nullptr;
     uint32_t fVblCount = 0; uint64_t fVblLastAbs = 0, fVblPeriodAbs = 0, fVblPollAbs = 0, fVblEarlyAbs = 0;
     uint64_t fVblFired = 0, fVblSynthetic = 0; int fVblToken = 0;
+    uint64_t fWinAbs = 0, fSecAbs = 0; uint32_t fWinCount = 0;
     static void vblThunk(thread_call_param_t me, thread_call_param_t) { ((XeGfxIntelFramebuffer *)me)->vblTick(); }
     void vblTick() {
         if (fVblStop) return;
@@ -525,6 +482,23 @@ public:
         const uint32_t c = rd(0x70040);
         bool fire = false;
         if (c != fVblCount) { fVblCount = c; fVblLastAbs = now; fire = true; }
+        // the refresh can change under us (display path: 60 -> 240 Hz on the same raster): follow the frame counter
+        // over each second, or the poll below would wake once per old period and deliver a quarter of the refreshes
+        if (!fWinAbs) { fWinAbs = now; fWinCount = c; }
+        else if (now - fWinAbs >= fSecAbs) {
+            uint64_t ns = 0; absolutetime_to_nanoseconds(now - fWinAbs, &ns);
+            const uint32_t frames = c - fWinCount;
+            if (frames >= 20 && ns) {
+                const uint32_t hz16 = (uint32_t)(((uint64_t)frames << 16) * 1000000000ull / ns);
+                const uint32_t d = hz16 > fHz16 ? hz16 - fHz16 : fHz16 - hz16;
+                if (d > fHz16 / 25) {   // more than 4 %
+                    XIFBLOG("VBL: refresh now %u.%02u Hz (was %u.%02u)", hz16 >> 16, ((hz16 & 0xffff) * 100) >> 16, fHz16 >> 16,
+                            ((fHz16 & 0xffff) * 100) >> 16);
+                    fHz16 = hz16; fVblPeriodAbs = (now - fWinAbs) / frames;
+                }
+            }
+            fWinAbs = now; fWinCount = c;
+        }
         else if (now - fVblLastAbs > 2 * fVblPeriodAbs) { fVblLastAbs = now; fire = true; fVblSynthetic++; }
         if (fire && fVblEnabled && fVblProc) {
             fVblProc(fVblTarget, fVblRef);
@@ -537,6 +511,14 @@ public:
 public:
     IOReturn registerForInterruptType(IOSelect type, IOFBInterruptProc proc, OSObject *target, void *ref, void **iref) override {
         int off = 0;
+        // display path: the connect interrupt is ours to fire (new modes after the KMS takeover, hotplug)
+        if (fGu605 && type == kIOFBConnectInterruptType && !PE_parse_boot_argn("-xeintelfbnokms", &off, sizeof off)) {
+            if (fConnProc) return kIOReturnBusy;
+            fConnProc = proc; fConnTarget = target; fConnRef = ref; fConnEnabled = true;
+            if (iref) *iref = &fConnToken;
+            kmsWatchStart();
+            return kIOReturnSuccess;
+        }
         if (!fGu605 || type != kIOFBVBLInterruptType || !fR || !fHz16 || PE_parse_boot_argn("-xeintelfbnovbl", &off, sizeof off))
             return IONDRVFramebuffer::registerForInterruptType(type, proc, target, ref, iref);
         if (fVblProc) return kIOReturnBusy;
@@ -548,6 +530,7 @@ public:
         nanoseconds_to_absolutetime(periodNs, &fVblPeriodAbs);
         nanoseconds_to_absolutetime(250000, &fVblPollAbs);
         nanoseconds_to_absolutetime(1000000, &fVblEarlyAbs);
+        nanoseconds_to_absolutetime(1000000000ull, &fSecAbs); fWinAbs = 0;
         fVblProc = proc; fVblTarget = target; fVblRef = ref; fVblEnabled = true; fVblStop = false;
         fVblCount = rd(0x70040); fVblLastAbs = mach_absolute_time();
         thread_call_enter_delayed(fVblCall, fVblLastAbs + fVblPollAbs);
@@ -556,6 +539,7 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn unregisterInterrupt(void *iref) override {
+        if (iref == &fConnToken) { fConnEnabled = false; fConnProc = nullptr; fConnTarget = nullptr; fConnRef = nullptr; return kIOReturnSuccess; }
         if (iref != &fVblToken) return IONDRVFramebuffer::unregisterInterrupt(iref);
         fVblStop = true; fVblEnabled = false;   // a tick already running sees fVblStop first and does not re-arm
         if (fVblCall) thread_call_cancel(fVblCall);
@@ -564,11 +548,15 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn setInterruptState(void *iref, UInt32 state) override {
+        if (iref == &fConnToken) { fConnEnabled = state != kDisabledInterruptState; return kIOReturnSuccess; }
         if (iref != &fVblToken) return IONDRVFramebuffer::setInterruptState(iref, state);
         fVblEnabled = state != kDisabledInterruptState;
         return kIOReturnSuccess;
     }
     bool hasDDCConnect(IOIndex ci) override { return fEdidLen ? true : IONDRVFramebuffer::hasDDCConnect(ci); }
+#include "kms.inc"
+#include "ddc.inc"
+
     IOReturn getDDCBlock(IOIndex ci, UInt32 block, IOSelect type, IOOptionBits opt, UInt8 *data, IOByteCount *len) override {
         if (!fEdidLen) return IONDRVFramebuffer::getDDCBlock(ci, block, type, opt, data, len);
         if (!data || !len || block < 1 || (int)(block * 128) > fEdidLen) return kIOReturnUnsupported;
@@ -576,7 +564,7 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn getAppleSense(IOIndex ci, UInt32 *senseType, UInt32 *primary, UInt32 *extended, UInt32 *displayType) override {
-        if (!fBacklight || ci != 0) return IONDRVFramebuffer::getAppleSense(ci, senseType, primary, extended, displayType);
+        if (!fBacklight || ci != 0 || fExternal) return IONDRVFramebuffer::getAppleSense(ci, senseType, primary, extended, displayType);
         if (senseType) *senseType = 0;
         if (primary) *primary = 0;
         if (extended) *extended = 0;
@@ -584,15 +572,18 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn getAttributeForConnection(IOIndex ci, IOSelect attr, uintptr_t *value) override {
-        if (fGu605 && ci == 0 && attr == kConnectionFlags && value) { *value = kIOConnectionBuiltIn; return kIOReturnSuccess; }
+        if (fGu605 && ci == 0 && attr == kConnectionFlags && value) { *value = fExternal ? 0 : kIOConnectionBuiltIn; return kIOReturnSuccess; }
         if (fEdidLen && attr == kConnectionSupportsHLDDCSense) return kIOReturnSuccess;
         return IONDRVFramebuffer::getAttributeForConnection(ci, attr, value);
     }
     // the panel's size and refresh, and ValidForHiRes so the 2x sizes reach Displays settings (I-059 on NVRMFB)
     IOReturn getInformationForDisplayMode(IODisplayModeID mode, IODisplayModeInformation *info) override {
-        IOReturn r = IONDRVFramebuffer::getInformationForDisplayMode(mode, info);
+        const XifbKmsMode *km = kmsMode(mode);
+        IOReturn r = IONDRVFramebuffer::getInformationForDisplayMode(km || mode == fBootId ? fBootId : mode, info);
         if (r != kIOReturnSuccess || !info) return r;
-        if (fHz16) info->refreshRate = fHz16;
+        if (km) { kmsInfo(km, info); return r; }
+        if (fHz16 && !(fGu605 && fBootId && mode == fBootId && fBootHz16)) info->refreshRate = fHz16;
+        if (fGu605 && fBootId && mode == fBootId && fBootHz16) info->refreshRate = fBootHz16;
         if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }
         info->flags |= kDisplayModeValidForHiResFlag;
         return r;

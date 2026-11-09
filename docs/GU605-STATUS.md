@@ -35,6 +35,25 @@ test kartı: `docs/GU605-TEST.md`; EFI farkı: `docs/GU605-EFI-CHANGES.md`.
 - Plan: 60 Hz piksel saati 240 Hz ile aynıysa yalnız zamanlama değişimi (günler); değilse i915 display yolu (Aşama 3b
   ile birlikte, haftalar) — dahili 240 Hz ve sol USB-C 1440p240 aynı işle gelir.
 
+## i915 ekran yolu (KMS) — dal `gu605-display`
+Tasarım: `docs/GU605-DISPLAY-DESIGN.md`. Varsayılan **kapalı** (`DISPLAY=adopt`); `gu605.conf`'ta `DISPLAY=kms` ile açılır.
+- **D1 (yapıldı):** KMS yalnız 7D55 + `xegfx.kms=1` + `-xegfxnokms` yok + aşama 2 devralma ön kontrolü geçti ise
+  (`XeGfxProbe/kms-preflight`); aksi halde aynı açılışta adopt yolu. KMS'te stolen ayırıcı boot FB'yi kapsar,
+  boot-FB GGTT rezervasyonu atlanır, `disable_display=0`, PSR/FBC/DC kapalı, aşama 4 sonrası kontrol fiziksel sayfa
+  + kare sayacı; `mtl_dmc.bin` gömülü.
+- **D2 (yapıldı):** `xkpi/src/i915/xg_kms.c` köprü: döküm (`sysctl debug.xegfx_kms`), tek-ekran atomic commit
+  (`debug.xegfx_kms_set="eDP-1 240"`, önce test), parlaklık (`debug.xegfx_kms_bl`, ‰), EDID, hotplug istemcisi.
+- **D3 (yapıldı):** `gu605-stages.sh` KMS env'i, `PANEL_HZ` (varsayılan 240) otomatik geçiş, `display-kms*.txt`,
+  başarısız KMS aşama 4 → `kms-failed` (sonraki açılışlar adopt); `gu605-display.sh` (dump/internal/external/bl).
+- **D4/D5 (yapıldı, deneysel):** XeGfxIntelFB 0.9.6: VBL gerçek yenileme hızını izler; boot raster'ında i915'in
+  doğruladığı her hız ayrı mod; `setDisplayMode` i915 üzerinden; parlaklık i915 üzerinden; sol USB-C monitör takılınca
+  (boot FB'ye sığan modla) görüntü ona geçer, panel kapanır, connect kesmesi; çıkarılınca panel geri gelir.
+  `-xeintelfbnokms`, `-xeintelfbnoext` ile kapatılır.
+- Donanımda denenmedi. Yerel derleme: 423/423 nesne, kext C++ sözdizimi temiz; CI (gu605-display tetikleyicisi) derler.
+- **DDC dalı için:** KMS kipinde AUX kanalları i915'indir; XeGfxIntelFB'nin doğrudan AUX yardımcıları (ve onları
+  kullanacak DDC/CI kodu) KMS hazırken çalışmamalı → DDC/CI, i915'in `drm_dp_aux` I2C'si üzerinden köprüye bir
+  `xgKms` işlemi olarak eklenmeli (bağlantı adı: `eDP-1` / `DP-n`).
+
 ## Sıradaki adım
 1. CI yeşil → `proposed/EFI/OC/Kexts/XeGfx.kext` doldur, firmware hash'lerini `gu605/firmware.lock`'a sabitle.
 2. Sahibin testi: `docs/GU605-TEST.md` (Ultimate 1 açılış, Eco 1 açılış, isteğe bağlı Standard).

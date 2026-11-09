@@ -1,7 +1,7 @@
 # GU605 branch (ASUS ROG Zephyrus G16 GU605MY, Meteor Lake iGPU 8086:7D55, macOS 15 Sequoia): builds the kexts, the
 # Intel Metal plugin bundle and (on an Intel runner) XeGfx.kext and Mesa ANV, packs them with the GU605 scripts and
 # publishes a prerelease gu605-<shortsha>.
-#   arm   (macos-14 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
+#   arm   (macos-26 by default, vars.GU605_ARM_RUNNER overrides; Apple silicon, cross to x86_64): XeGfxIntelFB, XeGfxAccel 15, XeGfxAGDC, XgFbMove, translator,
 #         XeMTLDriver.bundle, mtlprobe, host tests. These kexts declare fixed KPIs; nothing reads the host's KC.
 #   intel (macos-15-intel, only with vars.GU605_INTEL_JOB=1): XeGfx.kext (its link step classifies every undefined symbol against the runner's own
 #         x86_64 kernel collection, so it must run on Intel macOS) and the userland. Hosted Intel runners are scarce;
@@ -11,7 +11,7 @@
 name: gu605
 on:
   push:
-    branches: [gu605-mtl]
+    branches: [gu605-mtl, gu605-display, gu605-ddc]
   workflow_dispatch:
     inputs:
       firmware_ref:
@@ -32,21 +32,31 @@ env:
   XNU_TAG: xnu-11215.81.4                                   # macOS 15 xnu: config/*.exports for the arm job's link checks
 jobs:
   arm:
-    # macos-14 by default: during the November 2026 Actions incident macos-15 jobs were never picked up for this
-    # account while macos-14 ran. Repository variable GU605_ARM_RUNNER switches it back (e.g. macos-15).
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
+    # macos-26 by default: macos-14 images were retired (2026-11-09: "The configuration 'macos-14-arm64-us-default'
+    # is not supported") and macos-15 jobs sat queued for this account while macos-26 ran at once (gu605-probe, run
+    # 42612821724). Everything still targets macOS 15 (-mmacosx-version-min=15.0, kexts link-checked against
+    # xnu-11215's export lists); the image has only Xcode 26 SDKs. Repository variable GU605_ARM_RUNNER overrides it.
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
         run: |
-          # the newest Xcode 16 on the image: macOS 15 SDK (the kexts target 15.0); macos-14 defaults to Xcode 15
+          # the newest Xcode 16 on the image when there is one (macOS 15 SDK); macos-26 has only Xcode 26 (its default
+          # stays): the kexts and the plugin still target 15.0
           XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$XC" ] && sudo xcode-select -s "$XC/Contents/Developer"
           sw_vers; uname -m; xcodebuild -version || true
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
           xcrun clang --version | head -1
+          # rustup and cargo: the image's, else a minimal stable from rustup.rs (macos-26 had rustup but no cargo on PATH
+          # for build_xlate.sh, and the plugin shipped without its translator)
+          if ! command -v cargo > /dev/null; then
+            curl -fsSL --retry 3 https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"; export PATH=$HOME/.cargo/bin:$PATH
+          fi
           rustup target add x86_64-apple-darwin
+          command -v cargo; cargo --version
       - name: Headers (NVIDIA, Vulkan)
         run: |
           set -euo pipefail
@@ -97,17 +107,24 @@ jobs:
           set -euo pipefail
           export XEGFX_OUT=$PWD/out XEGFX_DEPS=$HOME/src/deps NVGFX_REF_PKGROOT=$PWD/out/xlate CARGO_BUILD_TARGET=x86_64-apple-darwin
           mkdir -p out/xlate
-          bash build/build_xlate.sh || echo "::warning::translator build failed; the bundle ships without it"
+          # the translator is required: without it WindowServer cannot translate a single shader (2026-11-09 macos-26 run
+          # 42613619863 shipped "translator none")
+          bash build/build_xlate.sh
           XLATE=$PWD/out/xlate/libnvmtl_translate.dylib bash build/build_gu605_plugin.sh
           lipo -archs out/plugin-gu605/XeMTLDriver.bundle/Contents/MacOS/XeMTLDriver
+          lipo -archs out/plugin-gu605/XeMTLDriver.bundle/Contents/MacOS/libnvmtl_translate.dylib
       - name: mtlprobe
         run: |
           mkdir -p out/tools
           xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework IOKit \
             userland/tools/mtlprobe.m -o out/tools/mtlprobe
           xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework QuartzCore \
-            -framework CoreImage -framework MetalPerformanceShaders -framework ImageIO -framework CoreGraphics -framework IOKit \
+            -framework CoreImage -framework MetalPerformanceShaders -framework ImageIO -framework CoreGraphics -framework IOKit -framework IOSurface \
             userland/tools/blurprobe.m -o out/tools/blurprobe
+          xcrun clang -fobjc-arc -O1 -arch x86_64 -mmacosx-version-min=15.0 -framework Foundation -framework Metal -framework QuartzCore \
+            -framework IOKit -framework IOSurface userland/tools/fpsprobe.m -o out/tools/fpsprobe
+          xcrun clang -O2 -arch x86_64 -mmacosx-version-min=15.0 -framework IOKit -framework CoreFoundation \
+            userland/tools/xeddcprobe.c -o out/tools/xeddcprobe
       - name: Host tests (XgFbMove relocation core, scripts)
         run: |
           set -euo pipefail
@@ -129,6 +146,8 @@ jobs:
             out/plugin-gu605/XeMTLDriver.bundle
             out/tools/mtlprobe
             out/tools/blurprobe
+            out/tools/fpsprobe
+            out/tools/xeddcprobe
             out/*.log
       - name: Logs
         if: always()
@@ -213,7 +232,7 @@ jobs:
   # Mesa ANV for the x86_64 Mac without an Intel runner: the same script on an Apple-silicon runner under Rosetta
   # (MacPorts x86_64 archives, every tool x86_64, the output checked with lipo). The pack step prefers the Intel job's.
   userland-rosetta:
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
@@ -252,7 +271,7 @@ jobs:
   pack:
     needs: [arm, intel, userland-rosetta]
     if: always() && needs.arm.result == 'success'
-    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-14' }}
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -268,7 +287,8 @@ jobs:
           for k in XeGfxIntelFB/XeGfxIntelFB XeGfxAccel/15/XeGfxAccel XeGfxAGDC/XeGfxAGDC XgFbMove/XgFbMove; do
             ditto "$A/kexts/$k.kext" "$P/Library/Extensions/$(basename "$k").kext"; done
           ditto "$A/plugin-gu605/XeMTLDriver.bundle" "$P/Library/GPUBundles/XeMTLDriver.bundle"
-          cp "$A/tools/mtlprobe" "$A/tools/blurprobe" "$P/tools/"; chmod 755 "$P/tools/mtlprobe" "$P/tools/blurprobe" "$P/Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/"*
+          cp "$A/tools/mtlprobe" "$A/tools/blurprobe" "$A/tools/fpsprobe" "$A/tools/xeddcprobe" "$P/tools/"
+          chmod 755 "$P/tools/mtlprobe" "$P/tools/blurprobe" "$P/tools/fpsprobe" "$P/tools/xeddcprobe" "$P/Library/GPUBundles/XeMTLDriver.bundle/Contents/MacOS/"*
           find "$P/Library" -path '*/MacOS/*' -type f -exec chmod 755 {} +
           NOTE=""
           if [ -f art/xegfx-out/XeGfx.kext/Contents/MacOS/XeGfx ]; then
@@ -312,5 +332,5 @@ jobs:
           set -euo pipefail
           SHA=${{ steps.pack.outputs.sha }}; T=gu605-$SHA
           gh release view "$T" >/dev/null 2>&1 && { echo "release $T exists"; exit 0; }
-          gh release create "$T" "out/pkg/$T.zip" --prerelease --target "$(git rev-parse HEAD)" --title "$T (GU605 test build)" \
-            --notes "Untested test build of branch gu605-mtl at $(git rev-parse HEAD). ${{ steps.pack.outputs.note }} Kurulum: docs/GU605-KURULUM.md, test: docs/GU605-TEST.md. SHA256SUMS inside the zip."
+          gh release create "$T" "out/pkg/$T.zip" --prerelease --target "$(git rev-parse HEAD)" --title "$T (GU605 test build, ${{ github.ref_name }})" \
+            --notes "Untested test build of branch ${{ github.ref_name }} at $(git rev-parse HEAD). ${{ steps.pack.outputs.note }} Kurulum: docs/GU605-KURULUM.md, test: docs/GU605-TEST.md. SHA256SUMS inside the zip."

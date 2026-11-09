@@ -8,11 +8,25 @@
 // framebuffer again. When no frame came for nvaccel_xeflip_idle_ms the idle call copies the frame on screen into the
 // boot framebuffer and shows that, so a WindowServer that stops (or exits) leaves its last picture, not a frozen slot.
 // Off by default:  sudo sysctl -w debug.nvaccel_xeflip=1  (0 goes back to copying from the next frame).
-#define XF_PAUSE(n) IOSleep(1)
+// the latch wait: IOSleep(1) steps, or (gXfPrecise, the asynchronous flip's thread) by the scanline: sleep while the
+// vblank is more than an eighth of a frame away, then 25 us steps, so the flip is seen landing within ~25 us, not a
+// millisecond or more late
+static void xfPause(unsigned n);
+#define XF_PAUSE(n) xfPause(n)
 #include "xeflip_core.h"
 
 static int gXeFlip = 0, gXeFlipIdleMs = 1000, gXfLastWhy = 0, gXfMapUs = 0, gXfFlipUs = 0, gXfLogs = 0;
 static struct xf gXf;
+static volatile int gXfPrecise;   // set under gXfLock by the asynchronous flip's thread only
+static void xfPause(unsigned n)
+{
+    (void)n;
+    if (!gXfPrecise || !gXf.bar || gXf.pipe < 0 || gXf.pipe > 3) { IOSleep(1); return; }
+    volatile xf_u8 *bar = gXf.bar;
+    const xf_u32 vt = xf_rd(bar, 0x6000Cu + (xf_u32)gXf.pipe * 0x1000u), act = (vt & 0xffffu) + 1;   // TRANS_VTOTAL: active lines
+    const xf_u32 line = xf_rd(bar, 0x70000u + (xf_u32)gXf.pipe * 0x1000u) & 0xfffffu;               // PIPEDSL
+    if (act > 8 && line < act && act - line > act / 8) IOSleep(1); else IODelay(25);
+}
 static xf_u64 gXfPte[XF_SLOTS][XF_SLOT_PAGES];
 static xf_u64 gXfPhys[XF_SLOT_PAGES];
 static IOMemoryDescriptor *gXfMd[XF_SLOTS];         // retained and prepared while its slot maps it
@@ -78,7 +92,30 @@ SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_homes, CTLFLAG_RD | CTLFLAG_LOCKED,
 SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_idle_homes, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfIdleHomes, "boot framebuffer shown again after an idle panel (frame copied first)");
 SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_kept, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfKept, "frames kept back: the surface's newest pixels were not in memory yet");
 SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_copied, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfCopied, "frames handed to the copy path (see last_why)");
+// <xfasync> GU605 2026-11-09: the flip completes off WindowServer's thread, as NVIDIA's (nvAccelIopAsyncRun). Synchronous,
+// performTransaction waited for the composite's GPU work (nvSurfWaitReady) and then for the panel to latch (~3.4 ms of a
+// 4.17 ms frame at 240 Hz) on WindowServer's thread: the desktop composited ~55 frames/s. 0 (default) = synchronous.
+static int gXeFlipAsync = 0, gXfAsyncWaitUs = 5200, gXfLatchUs = 0, gXfTxnUs = 0, gXfTxnUsMax = 0;
+static SInt64 gCntXfAsync, gCntXfAsyncKept, gCntXfAsyncDrop, gCntXfAsyncQueued, gCntXfAsyncRefused;
+SYSCTL_INT(_debug, OID_AUTO, nvaccel_xeflip_async, CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_KERN, &gXeFlipAsync, 0,
+           "1 = a flip waits for its composite and the panel's latch on a thread of its own and completes through "
+           "signalTransactionInterrupt (WindowServer's thread returns at once); 0 = synchronous (default)");
+SYSCTL_INT(_debug, OID_AUTO, nvaccel_xeflip_async_wait_us, CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_KERN, &gXfAsyncWaitUs, 0,
+           "a present that finds the last flip still in flight waits this long, then queues behind it (min 500)");
+SYSCTL_INT(_debug, OID_AUTO, nvaccel_xeflip_latch_us, CTLFLAG_RD | CTLFLAG_LOCKED | CTLFLAG_KERN, &gXfLatchUs, 0, "last asynchronous flip: PLANE_SURF written until the panel showed it, us");
+SYSCTL_INT(_debug, OID_AUTO, nvaccel_xeflip_txn_us, CTLFLAG_RD | CTLFLAG_LOCKED | CTLFLAG_KERN, &gXfTxnUs, 0, "last Intel panel present: time WindowServer's thread spent in it, us");
+SYSCTL_INT(_debug, OID_AUTO, nvaccel_xeflip_txn_us_max, CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_KERN, &gXfTxnUsMax, 0, "longest of those, us (write 0 to reset)");
+SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_async_flips, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfAsync, "frames flipped by the asynchronous thread");
+SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_async_kept, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfAsyncKept, "asynchronous frames kept back (newest pixels not in memory)");
+SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_async_queued, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfAsyncQueued, "presents queued behind a flip still in flight");
+SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_async_drops, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfAsyncDrop, "queued presents replaced by a newer one (dropped frames)");
+SYSCTL_QUAD(_debug, OID_AUTO, nvaccel_xeflip_async_refused, CTLFLAG_RD | CTLFLAG_LOCKED, &gCntXfAsyncRefused, "asynchronous flips that failed (3 in a row: async off)");
 
+static void nvXeTxnNote(uint64_t t0)
+{
+    gXfTxnUs = (int)nvXeUs(t0);
+    if (gXfTxnUs > gXfTxnUsMax) gXfTxnUsMax = gXfTxnUs;
+}
 static void nvXeFlipSysctls(void)
 {
     sysctl_register_oid(&sysctl__debug_nvaccel_xeflip);          sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_idle_ms);
@@ -87,6 +124,11 @@ static void nvXeFlipSysctls(void)
     sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_maps);     sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_homes);
     sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_idle_homes); sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_kept);
     sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_copied);   sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_ggtt);
+    sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_async);    sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_async_wait_us);
+    sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_latch_us); sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_txn_us);
+    sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_txn_us_max); sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_async_flips);
+    sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_async_kept); sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_async_queued);
+    sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_async_drops); sysctl_register_oid(&sysctl__debug_nvaccel_xeflip_async_refused);
 }
 
 static bool xfNo(int why)
@@ -151,37 +193,32 @@ static void xfArmIdle(void)
     thread_call_enter_delayed(gXfIdleCall, dl);
 }
 
-// true: the frame is on the panel (or kept back); false: copy it as before
-static bool nvXeFlip(NVAccel *a, IOService *fb, unsigned head, IOSurface *s)
+// The second half of a flip, after the checks: wait for the composite, map the surface into a slot if it is not in one,
+// show the slot. 1 on the panel, 0 kept back (the newest pixels are not in memory yet), < 0 the XF_* reason it was not
+// flipped (the caller counts it). precise: the latch wait follows the scanline (the asynchronous thread).
+static int xfShow(NVAccel *a, IOSurface *s, int p, bool precise)
 {
-    if (!gXeFlip || head != 4 || !s || !a) return false;
-    if (!gXeMmio && a->fPCI) gXeMmio = a->fPCI->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0, kIOMapInhibitCache);
-    if (!gXeMmio || gXeMmio->getLength() < 0x1000000) return xfNo(-8);
-    if (s->getPixelFormat() != 0x42475241u) return xfNo(-9);   // 'BGRA': the plane's XRGB8888
+    (void)a;
     const unsigned long long W = s->getWidth(), H = s->getHeight(), P = s->getBytesPerRow();
-    if (!W || !H || W > 16384 || H > 16384 || P < 4 * W || (P & 63)) return xfNo(-10);
     IOMemoryDescriptor *md = s->getMemoryDescriptor();
     const unsigned long long bytes = H * P;
-    if (!md || md->getLength() < bytes) return xfNo(-11);
-    volatile xf_u8 *bar = (volatile xf_u8 *)gXeMmio->getVirtualAddress();
-    const int p = xf_pipe_find(bar, (xf_u32)W, (xf_u32)H, (xf_u32)P);
-    if (p < 0) return xfNo(p);
+    if (!md || md->getLength() < bytes) return -11;
     // as the copy path: the composite must be finished, and its newest pixels in the surface's memory
     nvSurfWaitReady(s->getSurfaceID());
-    if (!nvAccelSurfCopyReady(s, head)) { OSAddAtomic64(1, &gCntXfKept); return true; }
+    if (!nvAccelSurfCopyReady(s, 4)) return 0;
     IOLock *l = xfLock();
-    if (!l) return xfNo(-8);
+    if (!l) return -8;
     IOLockLock(l);
-    gXf.bar = bar; gXf.pte = gXfPte; gXf.pipe = p;
+    gXf.bar = (volatile xf_u8 *)gXeMmio->getVirtualAddress(); gXf.pte = gXfPte; gXf.pipe = p;
     const xf_u64 key = (xf_u64)(uintptr_t)md;
     int i = xf_lookup(&gXf, key);
     if (i < 0) {
         const xf_u32 pages = (xf_u32)((bytes + 4095) >> 12);
-        if (pages > XF_SLOT_PAGES) { IOLockUnlock(l); return xfNo(XF_TOO_BIG); }
+        if (pages > XF_SLOT_PAGES) { IOLockUnlock(l); return XF_TOO_BIG; }
         i = xf_pick(&gXf);
-        if (i < 0) { IOLockUnlock(l); return xfNo(XF_NO_SLOT); }
+        if (i < 0) { IOLockUnlock(l); return XF_NO_SLOT; }
         xfRelease(i);
-        if (md->prepare() != kIOReturnSuccess) { IOLockUnlock(l); return xfNo(-11); }
+        if (md->prepare() != kIOReturnSuccess) { IOLockUnlock(l); return -11; }
         const uint64_t t0 = mach_absolute_time();
         bool whole = true;
         for (xf_u32 k = 0; k < pages && whole; k++) {
@@ -190,7 +227,7 @@ static bool nvXeFlip(NVAccel *a, IOService *fb, unsigned head, IOSurface *s)
             if (!pa || (pa & 0xfff)) whole = false; else gXfPhys[k] = pa;
         }
         const int r = whole ? xf_map(&gXf, i, key, gXfPhys, pages) : -11;
-        if (r != XF_OK) { md->complete(); IOLockUnlock(l); return xfNo(r); }
+        if (r != XF_OK) { md->complete(); IOLockUnlock(l); return r; }
         md->retain(); gXfMd[i] = md;
         gXfGeo[i][0] = W; gXfGeo[i][1] = H; gXfGeo[i][2] = P;
         gXfMapUs = (int)nvXeUs(t0);
@@ -199,15 +236,122 @@ static bool nvXeFlip(NVAccel *a, IOService *fb, unsigned head, IOSurface *s)
                          s->getSurfaceID(), W, H, P, i, xf_slot_addr(&gXf, i), pages, gXfMapUs);
     }
     const uint64_t t1 = mach_absolute_time();
+    gXfPrecise = precise ? 1 : 0;
     const int r = xf_flip(&gXf, i);
+    gXfPrecise = 0;
     gXfFlipUs = (int)nvXeUs(t1);
-    if (r == XF_OK) { gXfFb = fb; gXfLastFlip = mach_absolute_time(); }
+    if (precise) gXfLatchUs = gXfFlipUs;
+    if (r == XF_OK) gXfLastFlip = mach_absolute_time();
     IOLockUnlock(l);
-    if (r != XF_OK) return xfNo(r);
+    if (r != XF_OK) return r;
     const SInt64 n = OSAddAtomic64(1, &gCntXfFlips);
-    if (n < 3 || n == 600) ALOG("xeflip: frame #%lld on the panel straight from surface 0x%x (slot %d, %d us to latch, boot 0x%08x)",
-                                (long long)n + 1, s->getSurfaceID(), i, gXfFlipUs, gXf.boot);
+    if (n < 3 || n == 600) ALOG("xeflip: frame #%lld on the panel straight from surface 0x%x (slot %d, %d us to latch, boot 0x%08x%s)",
+                                (long long)n + 1, s->getSurfaceID(), i, gXfFlipUs, gXf.boot, precise ? ", asynchronous" : "");
     xfArmIdle();
+    return 1;
+}
+
+// <xfasync> one flip in flight on its own thread call; a present that comes while it is still landing waits up to
+// debug.nvaccel_xeflip_async_wait_us, then queues behind it (replacing an older queued one: a dropped frame). The pipe's
+// isTransactionComplete answers "not yet" while busy, and the thread ends each flip with signalTransactionInterrupt.
+extern "C" void _ZN18IOAccelDisplayPipe26signalTransactionInterruptEPv(void *pipe, void *arg);
+struct XfAsync { void *pipe; IOService *fb; IOSurface *s; int p; IOSurface *next; int nextP; volatile SInt32 busy; struct thread_call *call; };
+static XfAsync gXfAs;
+static IOLock *gXfAsLock;
+static SInt32 gXfAsyncRefuseRun;
+static bool nvXeFlipAsyncBusy(const void *pipe)
+{
+    return gXfAs.pipe == pipe && __atomic_load_n(&gXfAs.busy, __ATOMIC_ACQUIRE);
+}
+static void xfAsyncRun(void *, void *)
+{
+    XfAsync *e = &gXfAs;
+    IOSurface *s = e->s; int p = e->p; e->s = nullptr;
+  again:
+    {
+        const int r = xfShow(NVAccel::gAccel, s, p, true);
+        if (r == 1) { gXfFb = e->fb; gXfAsyncRefuseRun = 0; OSAddAtomic64(1, &gCntXfAsync); }
+        else if (r == 0) { OSAddAtomic64(1, &gCntXfKept); OSAddAtomic64(1, &gCntXfAsyncKept); }
+        else {
+            (void)xfNo(r); OSAddAtomic64(1, &gCntXfAsyncRefused);
+            if (++gXfAsyncRefuseRun >= 3 && gXeFlipAsync) {
+                gXeFlipAsync = 0;
+                ALOG("xeflip: 3 asynchronous flips failed in a row (last reason %d) -- debug.nvaccel_xeflip_async=0 (synchronous, which copies on failure)", r);
+            }
+        }
+        ((OSObject *)s)->release();
+    }
+    IOSurface *queued = nullptr;
+    IOLockLock(gXfAsLock);
+    queued = e->next; e->next = nullptr;
+    if (queued) p = e->nextP;
+    else { __atomic_store_n(&e->busy, 0, __ATOMIC_RELEASE); IOLockWakeup(gXfAsLock, (event_t)&e->busy, false); }
+    IOLockUnlock(gXfAsLock);
+    _ZN18IOAccelDisplayPipe26signalTransactionInterruptEPv(e->pipe, nullptr);
+    if (queued) { s = queued; goto again; }
+}
+static bool xfAsyncStart(void *pipe, IOService *fb, IOSurface *s, int p)
+{
+    XfAsync *e = &gXfAs;
+    if (!gXfAsLock) { IOLock *l = IOLockAlloc(); if (l && !OSCompareAndSwapPtr(nullptr, l, (void *volatile *)&gXfAsLock)) IOLockFree(l); }
+    if (!gXfAsLock) return false;
+    if (!e->call) e->call = thread_call_allocate(xfAsyncRun, nullptr);
+    if (!e->call) return false;
+    if (__atomic_load_n(&e->busy, __ATOMIC_ACQUIRE)) {
+        uint64_t end = 0; clock_interval_to_deadline((uint32_t)(gXfAsyncWaitUs < 500 ? 500 : gXfAsyncWaitUs), kMicrosecondScale, &end);
+        IOLockLock(gXfAsLock);
+        while (__atomic_load_n(&e->busy, __ATOMIC_ACQUIRE) && mach_absolute_time() < end)
+            IOLockSleepDeadline(gXfAsLock, (event_t)&e->busy, end, THREAD_UNINT);
+        if (__atomic_load_n(&e->busy, __ATOMIC_ACQUIRE)) {
+            // still in flight: this frame follows it, replacing an older queued one
+            IOSurface *old = e->next;
+            ((OSObject *)s)->retain();
+            e->next = s; e->nextP = p;
+            IOLockUnlock(gXfAsLock);
+            OSAddAtomic64(1, &gCntXfAsyncQueued);
+            if (old) { OSAddAtomic64(1, &gCntXfAsyncDrop); ((OSObject *)old)->release(); }
+            return true;
+        }
+        IOLockUnlock(gXfAsLock);
+    }
+    ((OSObject *)s)->retain();
+    e->pipe = pipe; e->fb = fb; e->s = s; e->p = p;
+    __atomic_store_n(&e->busy, 1, __ATOMIC_RELEASE);
+    thread_call_enter(e->call);
+    const SInt64 n = gCntXfAsync;
+    if (n == 0 && gXfLogs < 16) { gXfLogs++; ALOG("xeflip: asynchronous flips ON (debug.nvaccel_xeflip_async=1): WindowServer's thread no longer waits for the GPU or the latch"); }
+    return true;
+}
+// waits (at most 100 ms) for a flip in flight to land, so the accelerator can stop
+static void xfAsyncDrain(void)
+{
+    if (!gXfAsLock) return;
+    uint64_t end = 0; clock_interval_to_deadline(100, kMillisecondScale, &end);
+    IOLockLock(gXfAsLock);
+    while (__atomic_load_n(&gXfAs.busy, __ATOMIC_ACQUIRE) && mach_absolute_time() < end)
+        IOLockSleepDeadline(gXfAsLock, (event_t)&gXfAs.busy, end, THREAD_UNINT);
+    IOLockUnlock(gXfAsLock);
+}
+
+// true: the frame is on the panel (or kept back, or handed to the asynchronous thread); false: copy it as before
+static bool nvXeFlip(NVAccel *a, IOService *fb, unsigned head, IOSurface *s, void *pipe)
+{
+    if (!gXeFlip || head != 4 || !s || !a) return false;
+    if (!gXeMmio && a->fPCI) gXeMmio = a->fPCI->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0, kIOMapInhibitCache);
+    if (!gXeMmio || gXeMmio->getLength() < 0x1000000) return xfNo(-8);
+    if (s->getPixelFormat() != 0x42475241u) return xfNo(-9);   // 'BGRA': the plane's XRGB8888
+    const unsigned long long W = s->getWidth(), H = s->getHeight(), P = s->getBytesPerRow();
+    if (!W || !H || W > 16384 || H > 16384 || P < 4 * W || (P & 63)) return xfNo(-10);
+    IOMemoryDescriptor *md = s->getMemoryDescriptor();
+    if (!md || md->getLength() < H * P) return xfNo(-11);
+    volatile xf_u8 *bar = (volatile xf_u8 *)gXeMmio->getVirtualAddress();
+    const int p = xf_pipe_find(bar, (xf_u32)W, (xf_u32)H, (xf_u32)P);
+    if (p < 0) return xfNo(p);
+    if (gXeFlipAsync && pipe && xfAsyncStart(pipe, fb, s, p)) return true;
+    const int r = xfShow(a, s, p, false);
+    if (r == 0) { OSAddAtomic64(1, &gCntXfKept); return true; }
+    if (r < 0) return xfNo(r);
+    gXfFb = fb;
     return true;
 }
 // after a copied frame (it went into the boot framebuffer): show the boot framebuffer again
@@ -222,12 +366,13 @@ static void nvXeFlipHome(void)
 // the accelerator stops: last frame into the boot framebuffer, boot framebuffer on the panel, surfaces let go
 static void nvXeFlipShutdown(void)
 {
-    gXeFlip = 0;
+    gXeFlip = 0; gXeFlipAsync = 0;
+    xfAsyncDrain();
     IOLock *l = gXfLock;
     if (!l) return;
     IOLockLock(l);
     if (xfHomeWithCopy(NVAccel::gAccel)) { for (int i = 0; i < XF_SLOTS; i++) xfRelease(i); xf_forget(&gXf); }
     IOLockUnlock(l);
 }
-#define XEFLIP_TRY(a, fb, head, s) nvXeFlip((a), (fb), (head), (s))
+#define XEFLIP_TRY(a, fb, head, s, pipe) nvXeFlip((a), (fb), (head), (s), (pipe))
 // </xeflip>
