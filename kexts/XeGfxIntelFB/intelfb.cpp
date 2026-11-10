@@ -302,6 +302,9 @@ class XeGfxIntelFramebuffer : public IONDRVFramebuffer {
     void curRegs(SInt32 x, SInt32 y, bool on) {
         uint32_t pos = (x < 0 ? (1u << 15) | (uint32_t)(-x & 0xfff) : (uint32_t)(x & 0xfff)) |
                        (y < 0 ? (1u << 31) | ((uint32_t)(-y & 0xfff) << 16) : ((uint32_t)(y & 0xfff) << 16));
+        // [gu605-mac] never without the level-0 watermark: i915's commits (display path) write the cursor's watermarks
+        // as off, and a cursor plane fetching without one underruns the pipe; kmsCursorArm writes them again
+        if (on && !(rd(XIFB_CUR_WM0) & (1u << 31))) on = false;
         wr(XIFB_CUR_POS, pos);
         wr(XIFB_CUR_CTL, on ? (1u << 14) | 0x23u : 0);  // trickle feed off, 256x256 ARGB (0x27 is 64x64)
         wr(XIFB_CUR_BASE, XIFB_CUR_GGTT);                // arms CTL, POS, WM and BUF_CFG
@@ -338,7 +341,9 @@ public:
         IOFree(st, bytes);
         static unsigned n; if (++n <= 4) XIFBLOG("hw cursor image %u: %s %ux%u", n, ok ? "ok" : "declined", (unsigned)ci.cursorWidth, (unsigned)ci.cursorHeight);
         if (!ok) return kIOReturnUnsupported;
-        curDdb();   // once: waits two frames, so here (thread context) and not in setCursorState
+        // once: waits two frames, so here (thread context) and not in setCursorState. Not once i915 owns the display:
+        // the DBUF is i915's then (kmsCursorArm uses the share i915 reserved)
+        if (!gXifbKms) curDdb();
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
         curPtes(); fCurImg = true; if (fCurDdb) curRegs(fCurX, fCurY, fCurVis);
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
@@ -488,7 +493,8 @@ public:
         else if (now - fWinAbs >= fSecAbs) {
             uint64_t ns = 0; absolutetime_to_nanoseconds(now - fWinAbs, &ns);
             const uint32_t frames = c - fWinCount;
-            if (frames >= 20 && ns) {
+            // [gu605-mac] a modeset restarts the counter: c - fWinCount wraps to ~4e9 "frames" and the period became 0
+            if (frames >= 20 && frames < 2000 && ns) {
                 const uint32_t hz16 = (uint32_t)(((uint64_t)frames << 16) * 1000000000ull / ns);
                 const uint32_t d = hz16 > fHz16 ? hz16 - fHz16 : fHz16 - hz16;
                 if (d > fHz16 / 25) {   // more than 4 %

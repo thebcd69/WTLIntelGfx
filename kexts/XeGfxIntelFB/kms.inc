@@ -83,23 +83,95 @@
     }
     bool kmsCommit(const char *name, uint32_t w, uint32_t h, uint32_t mhz) {
         uint32_t v[4] = { w, h, mhz, 0 }; char msg[128] = {};
+        OSIncrementAtomic(&fKmsBusy);   // the tick leaves the cursor alone while i915 commits
+        kmsCursorPark();
         bool ok = xifbKmsCall(1, (void *)name, v, msg);
         XIFBLOG("display path: %s %ux%u %u mHz -> %s (%s)", name, w, h, mhz, ok ? "committed" : "REFUSED", msg);
+        kmsCursorArm(ok ? "after a commit" : "after a refused commit");
+        OSDecrementAtomic(&fKmsBusy);
         return ok;
     }
-    // i915 owns the planes, DBUF and watermarks now: the hardware cursor here programs cursor A and its DBUF share behind
-    // i915's back (its commits turn cursor A off and give the DBUF to plane 1), which ends in FIFO underruns. Software
-    // cursor until the cursor goes through i915's cursor plane.
+    // Hardware cursor while i915 owns the display (2026-11-10). WAS: software cursor from the takeover on, because the
+    // GOP-era setup (curDdb: blocks 2016..2047, fixed watermarks) is wrong under i915 and underran the pipe. With a
+    // software cursor WindowServer composites the pointer, so it moved at the desktop's frame rate (owner: "mouse 60 Hz
+    // gibi ama 240 degil", and 5 fps without Metal).
+    // i915 keeps the pipe's cursor share of the DBUF reserved while its own cursor plane is off
+    // (skl_crtc_allocate_plane_ddb) and writes it to CUR_BUF_CFG, with every cursor watermark off (read on this
+    // machine, pipe A alone: CUR_BUF_CFG 0x0fff0f16 = blocks 3862..4095, plane 1 0..3861, CUR_WM* all 0). So the
+    // cursor plane can be ours inside i915's allocation; only its watermarks are missing. They follow from plane 1's:
+    // the same latency gives the same line count per level, and a 256-pixel ARGB row (1024 B in 512 B blocks, +1 as
+    // skl_compute_wm_params does for linear surfaces) is 3 blocks per line, result +1. Plane 1 confirms the formula:
+    // level 0 is 3 lines * 21 + 1 = 64 blocks, level 1 39 * 21 + 1 = 820. The transition watermarks add i915's
+    // offset to level 0 (plane 1: 78 - 64 = 14). Levels are enabled exactly where plane 1 has them enabled.
+    // An i915 commit turns cursor A and its watermarks off again: kmsCommit parks the cursor before and arms it
+    // after, and the tick arms it again after a commit that did not come through here (gu605-display.sh).
+    // NVRAM xeintelfb-kmscur=0 keeps the software cursor (read every tick: takes effect within a second).
+    bool fKmsCur = false; unsigned fKmsCurLogs = 0; volatile SInt32 fKmsBusy = 0;
+    static bool kmsCurWanted() {
+        IORegistryEntry *o = IORegistryEntry::fromPath("/options", gIODTPlane); if (!o) return true;
+        bool want = true;
+        if (OSObject *p = o->copyProperty("xeintelfb-kmscur")) {
+            if (OSData *d = OSDynamicCast(OSData, p)) { if (d->getLength() >= 1 && *(const char *)d->getBytesNoCopy() == '0') want = false; }
+            else if (OSString *st = OSDynamicCast(OSString, p)) { if (st->getChar(0) == '0') want = false; }
+            p->release();
+        }
+        o->release();
+        return want;
+    }
+    // cursor A and its watermarks as an i915 commit expects to find them: off
+    void kmsCursorPark() {
+        if (!fKmsCur || !fCurLock) return;
+        IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
+        fKmsCur = false;
+        wr(XIFB_CUR_CTL, 0);
+        for (uint32_t o = 0; o < 0x20; o += 4) wr(XIFB_CUR_WM0 + o, 0);
+        wr(0x70168, 0);
+        wr(XIFB_CUR_BASE, rd(XIFB_CUR_BASE));
+        IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
+    }
+    bool kmsCursorArm(const char *why) {
+        if (!fKmsUp && !gXifbKms) return false;
+        if (!fCurLock || !fCurKva || !kmsCurWanted()) return false;
+        const uint32_t buf = rd(XIFB_CUR_BUF), s = buf & 0xfffu, e = (buf >> 16) & 0xfffu, size = e >= s && buf ? e - s + 1 : 0;
+        uint32_t cw[9] = {}, need = 0; const uint32_t en = 1u << 31, p0 = rd(0x70240);
+        for (int l = 0; l < 7; l++) {   // levels 0..5 and the SAGV level (0x70258)
+            const uint32_t pw = rd(0x70240 + 4 * (uint32_t)l), lines = (pw >> 14) & 0x1fffu;
+            if (!(pw & en)) continue;
+            cw[l] = en | (pw & (1u << 30)) | (lines << 14) | (lines * 3 + 1);
+            if (lines * 3 + 1 > need) need = lines * 3 + 1;
+        }
+        const uint32_t pst = rd(0x7025c), pt = rd(0x70268);   // SAGV transition, transition
+        if ((pst & en) && cw[6]) cw[7] = en | (((cw[6] & 0xfffu) + ((pst & 0xfffu) - (rd(0x70258) & 0xfffu))) & 0xfffu);
+        if ((pt & en) && cw[0]) cw[8] = en | (((cw[0] & 0xfffu) + ((pt & 0xfffu) - (p0 & 0xfffu))) & 0xfffu);
+        for (int l = 7; l < 9; l++) if ((cw[l] & 0xfffu) > need) need = cw[l] & 0xfffu;
+        if (!(p0 & en) || !cw[0] || !size || need > size || !(rd(0x70180) & en)) {
+            if (fKmsCurLogs++ < 6) XIFBLOG("display path: no hardware cursor (%s): CUR_BUF_CFG %08x (%u blocks), needs %u, plane 1 CTL %08x WM0 %08x", why, buf, size, need, rd(0x70180), p0);
+            return false;
+        }
+        IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
+        for (int l = 0; l < 8; l++) wr(XIFB_CUR_WM0 + 4 * (uint32_t)l, cw[l]);
+        wr(0x70168, cw[8]);
+        fCurDdb = true; fCurReady = true; fKmsCur = true;
+        curPtes();
+        curRegs(fCurX, fCurY, fCurVis && fCurImg);
+        IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
+        if (fKmsCurLogs++ < 12) XIFBLOG("display path: hardware cursor armed (%s): DBUF %u..%u, level 0 %08x, SAGV %08x, trans %08x", why, s, e, cw[0], cw[6], cw[8]);
+        return true;
+    }
+    // software cursor: the cursor plane is not usable under i915 right now (no DBUF share, or xeintelfb-kmscur=0)
     void kmsCursorOff() {
         if (!fCurReady || !fCurLock) return;
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
-        fCurReady = false;
-        if (rd(XIFB_CUR_CTL)) { wr(XIFB_CUR_CTL, 0); wr(XIFB_CUR_BASE, rd(XIFB_CUR_BASE)); }
+        fCurReady = false; fKmsCur = false;
+        wr(XIFB_CUR_CTL, 0);
+        for (uint32_t o = 0; o < 0x20; o += 4) wr(XIFB_CUR_WM0 + o, 0);
+        wr(0x70168, 0);
+        wr(XIFB_CUR_BASE, rd(XIFB_CUR_BASE));
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
-        XIFBLOG("display path: hardware cursor off (i915 owns the planes and DBUF), software cursor from now on");
+        XIFBLOG("display path: hardware cursor off, software cursor from now on");
     }
     void kmsUpNow() {
-        kmsCursorOff();
+        if (!kmsCursorArm("i915 took the display")) kmsCursorOff();
         IODisplayModeID id = 0; IOIndex depth = 0; IODisplayModeInformation bi; bzero(&bi, sizeof bi);
         if (IONDRVFramebuffer::getCurrentDisplayMode(&id, &depth) != kIOReturnSuccess ||
             IONDRVFramebuffer::getInformationForDisplayMode(id, &bi) != kIOReturnSuccess || !bi.nominalWidth) {
@@ -167,7 +239,21 @@
     }
     void kmsTick() {
         if (!fKmsUp) { if (xifbKmsService()) kmsUpNow(); }
-        else { unsigned h = 0; if (xifbKmsCall(4, &h, nullptr, nullptr) && h != fKmsHot) { fKmsHot = h; kmsHotplug(); } }
+        else {
+            unsigned h = 0; if (xifbKmsCall(4, &h, nullptr, nullptr) && h != fKmsHot) { fKmsHot = h; kmsHotplug(); }
+            // the cursor follows xeintelfb-kmscur and comes back after an i915 commit from elsewhere; a change of
+            // path reaches IOFramebuffer through the connect interrupt (it asks for every cursor image again)
+            const bool want = kmsCurWanted();
+            if (fKmsBusy) { }
+            else if (fCurReady && !want) { kmsCursorOff(); kmsFireConnect("software cursor asked for"); }
+            else if (want && fCurKva && fCurLock && (!fCurReady || !fKmsCur || !(rd(XIFB_CUR_WM0) & (1u << 31)))) {
+                const bool was = fCurReady;
+                const bool ok = kmsCursorArm("tick");
+                if (ok && !was) kmsFireConnect("hardware cursor back");
+                // "ready" without watermarks would be an invisible pointer: software until the next tick succeeds
+                else if (!ok && was && !fKmsBusy) { kmsCursorOff(); kmsFireConnect("no cursor share from i915"); }
+            }
+        }
         kmsArm(fKmsUp ? 1000 : 500);
     }
     const XifbKmsMode *kmsMode(IODisplayModeID id) const {
@@ -175,10 +261,38 @@
         const int i = (int)((id - kKmsBase) >> 8);
         return i < fKmN && fKmOffer[i] ? &fKm[i] : nullptr;
     }
+    // the monitor's default mode: the fastest offered one at its preferred raster. WAS: every mode the EDID marks
+    // preferred (PG27AQDM: 239.972 and 59.950 Hz), and WindowServer took the 60 Hz one (2026-11-10 14:41)
+    const XifbKmsMode *kmsBest() const {
+        const XifbKmsMode *b = nullptr;
+        for (int i = 0; i < fKmN; i++) if (fKmOffer[i] && fKm[i].preferred && (!b || fKm[i].mhz > b->mhz)) b = &fKm[i];
+        if (b) for (int i = 0; i < fKmN; i++) if (fKmOffer[i] && fKm[i].w == b->w && fKm[i].h == b->h && fKm[i].mhz > b->mhz) b = &fKm[i];
+        if (!b) for (int i = 0; i < fKmN && !b; i++) if (fKmOffer[i]) b = &fKm[i];
+        return b;
+    }
+    // the i915 mode that IS the boot mode (the boot raster at the firmware's rate; not offered under an ID of its own)
+    const XifbKmsMode *kmsBootKm() const {
+        if (!fKmsUp || fExternal || !fBootId) return nullptr;
+        for (int i = 0; i < fKmN; i++) {
+            const uint32_t hz = kmsHz16(fKm[i]), d = hz > fBootHz16 ? hz - fBootHz16 : fBootHz16 - hz;
+            if (fKm[i].w == fBootW && fKm[i].h == fBootH && !(fKm[i].flags & 0x10) && fKm[i].mhz && d <= (3u << 15)) return &fKm[i];
+        }
+        return nullptr;
+    }
+    static void kmsDetailed(const XifbKmsMode *km, IODetailedTimingInformationV2 &d) {
+        bzero(&d, sizeof d);
+        d.pixelClock = d.minPixelClock = d.maxPixelClock = (UInt64)km->clock_khz * 1000;
+        d.horizontalActive = km->w; d.horizontalBlanking = km->htotal - km->w;
+        d.horizontalSyncOffset = km->hss - km->w; d.horizontalSyncPulseWidth = km->hse - km->hss;
+        d.verticalActive = km->h; d.verticalBlanking = km->vtotal - km->h;
+        d.verticalSyncOffset = km->vss - km->h; d.verticalSyncPulseWidth = km->vse - km->vss;
+        d.horizontalSyncConfig = (km->flags & 1) ? 1 : 0; d.verticalSyncConfig = (km->flags & 4) ? 1 : 0;   // +hsync, +vsync
+        d.signalConfig = kIODigitalSignal;
+    }
     void kmsInfo(const XifbKmsMode *m, IODisplayModeInformation *info) {
         info->nominalWidth = m->w; info->nominalHeight = m->h; info->refreshRate = kmsHz16(*m);
         info->flags = (info->flags & ~(UInt32)kDisplayModeDefaultFlag) | kDisplayModeValidFlag | kDisplayModeSafeFlag | kDisplayModeValidForHiResFlag;
-        if (fExternal && m->preferred) info->flags |= kDisplayModeDefaultFlag;
+        if (fExternal && m == kmsBest()) info->flags |= kDisplayModeDefaultFlag;
         if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }
     }
 public:
@@ -232,7 +346,7 @@ public:
     // monitor. The flags replace the mode's safety flags (valid, safe, default) in that call.
     IOReturn connectFlags(IOIndex ci, IODisplayModeID mode, IOOptionBits *flags) override {
         if (!kmsMode(mode)) return IONDRVFramebuffer::connectFlags(ci, mode, flags);
-        if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag | (fExternal && mode == fCurId ? kDisplayModeDefaultFlag : 0);
+        if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag | (fExternal && kmsMode(mode) == kmsBest() ? kDisplayModeDefaultFlag : 0);
         return kIOReturnSuccess;
     }
     // the boot NDRV's preferred configuration is the firmware's mode, which is not in the list while a monitor has
@@ -253,20 +367,29 @@ public:
         if (r == kIOReturnSuccess && km && pi) { pi->activeWidth = km->w; pi->activeHeight = km->h; }
         return r;
     }
+    // The boot mode needs its real timing too once i915 owns the display (2026-11-10). IOFramebuffer::setVBLTiming
+    // turns its VBL throttle on for a mode with a detailed timing whose min and max pixel clock are equal (every i915
+    // mode here): the VBL interrupt is then enabled once in 5 seconds and the refresh times are calculated. For a mode
+    // WITHOUT a detailed timing it clears the calculated period but leaves the throttle on. The boot NDRV has no
+    // detailed timing for the boot mode, so after the monitor on the left USB-C had the picture (throttle on) and the
+    // panel came back on the boot mode, WindowServer got one VBL per 5 seconds: 6-7 frames/s on the panel with its
+    // main thread idle 61 % of the time (sample 14:44), while the same desktop on the monitor was fluid.
     IOReturn getTimingInfoForDisplayMode(IODisplayModeID mode, IOTimingInformation *info) override {
         const XifbKmsMode *km = kmsMode(mode);
+        if (!km && info && mode == fBootId) {
+            if (const XifbKmsMode *bk = kmsBootKm()) {
+                IOReturn r = IONDRVFramebuffer::getTimingInfoForDisplayMode(mode, info);   // the NDRV's timing ID stays
+                if (r != kIOReturnSuccess) return r;
+                info->flags |= kIODetailedTimingValid;
+                kmsDetailed(bk, info->detailedInfo.v2);
+                return kIOReturnSuccess;
+            }
+        }
         if (!km || !info) return IONDRVFramebuffer::getTimingInfoForDisplayMode(km ? fBootId : mode, info);
         bzero(info, sizeof *info);
         info->appleTimingID = kIOTimingIDInvalid;
         info->flags = kIODetailedTimingValid;
-        IODetailedTimingInformationV2 &d = info->detailedInfo.v2;
-        d.pixelClock = d.minPixelClock = d.maxPixelClock = (UInt64)km->clock_khz * 1000;
-        d.horizontalActive = km->w; d.horizontalBlanking = km->htotal - km->w;
-        d.horizontalSyncOffset = km->hss - km->w; d.horizontalSyncPulseWidth = km->hse - km->hss;
-        d.verticalActive = km->h; d.verticalBlanking = km->vtotal - km->h;
-        d.verticalSyncOffset = km->vss - km->h; d.verticalSyncPulseWidth = km->vse - km->vss;
-        d.horizontalSyncConfig = (km->flags & 1) ? 1 : 0; d.verticalSyncConfig = (km->flags & 4) ? 1 : 0;   // +hsync, +vsync
-        d.signalConfig = kIODigitalSignal;
+        kmsDetailed(km, info->detailedInfo.v2);
         return kIOReturnSuccess;
     }
 public:
