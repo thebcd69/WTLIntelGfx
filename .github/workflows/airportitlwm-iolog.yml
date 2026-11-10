@@ -1,0 +1,53 @@
+# airportitlwm-iolog.yml (gu605-mac, 2026-11-10): laobamac/itlwm's AirportItlwm-Sequoia (7204c69, the build that
+# starts on the GU605's Intel 8086:7E40 and then leaves the card without a word) rebuilt with its log macro on IOLog
+# instead of kprintf, so its messages reach the unified log (`log show`) on this machine. Nothing else changed.
+# Publishes prerelease airportitlwm-iolog-<sha>. Run: gh workflow run airportitlwm-iolog.yml --ref gu605-mac
+name: airportitlwm-iolog
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: laobamac/itlwm commit
+        default: 7204c69
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: laobamac/itlwm
+          ref: ${{ github.event.inputs.ref }}
+          path: itlwm
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: acidanthera/MacKernelSDK
+          ref: 3f750085caa17ec3a7880f11c11bf4f48cd6a164
+          path: itlwm/MacKernelSDK
+      - name: Log through IOLog
+        run: |
+          set -euo pipefail
+          cd itlwm
+          perl -0pi -e 's/kprintf\("%s: " fmt, "itlwm", ##x\);/IOLog("%s: " fmt, "itlwm", ##x);/' itl80211/linux/types.h
+          grep -n 'IOLog("%s: " fmt, "itlwm"' itl80211/linux/types.h
+          grep -rn 'kprintf' --include=*.h --include=*.hpp --include=*.cpp --include=*.c . | grep -v MacKernelSDK | head -20 || true
+      - name: Build AirportItlwm-Sequoia
+        run: |
+          set -euo pipefail
+          cd itlwm
+          xcodebuild -project itlwm.xcodeproj -scheme AirportItlwm-Sequoia -configuration Debug -jobs 3 ARCHS=x86_64 \
+            SYMROOT="$PWD/build/products" OBJROOT="$PWD/build/obj" CODE_SIGNING_ALLOWED=NO \
+            GIT_COMMIT="_$(git rev-parse --short HEAD)-iolog" build > ../build.log 2>&1 || { tail -80 ../build.log; exit 1; }
+          K=$(find build/products -name AirportItlwm.kext -maxdepth 3 | head -1); echo "$K"
+          mkdir -p ../out && ditto -c -k --keepParent "$K" ../out/AirportItlwm-Sequoia-iolog.zip
+          (cd ../out && shasum -a 256 AirportItlwm-Sequoia-iolog.zip > SHA256SUMS && cat SHA256SUMS)
+      - name: Prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          S=$(git -C itlwm rev-parse --short HEAD); T=airportitlwm-iolog-$S-$(git rev-parse --short HEAD)
+          gh release create "$T" out/AirportItlwm-Sequoia-iolog.zip out/SHA256SUMS --prerelease --target "$(git rev-parse HEAD)" \
+            --title "$T (laobamac/itlwm $S, Debug, log via IOLog)" --notes "AirportItlwm-Sequoia from laobamac/itlwm $S with XYLog on IOLog (GU605 Wi-Fi diagnosis)."
