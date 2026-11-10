@@ -15,10 +15,22 @@ R=$L/boot-$(date +%Y%m%d-%H%M%S); mkdir -p "$R"; S=$R/summary.txt
 # [gu605-mac] the pending mark is kept in a file as well: on this machine an nvram write is not on the flash before a
 # panic or the power button (2026-11-09 17:06: panic in stage 4 with gu605-pending=1, next boot read 0 and ran again)
 PF=$G/pending-run
-pend() { nvram gu605-pending="$1" 2>/dev/null; printf '%s %s\n' "$1" "$R" > "$PF.tmp" && mv -f "$PF.tmp" "$PF"; sync; }
+# sync(2) only schedules the writes on macOS: F_FULLFSYNC (51) on the file and its folder puts them on the flash
+fullsync() { /usr/bin/python3 -c 'import os,fcntl,sys
+for p in sys.argv[1:]:
+    fd=os.open(p,os.O_RDONLY); fcntl.fcntl(fd,51); os.close(fd)' "$@" 2>/dev/null || sync; }
+pend() { nvram gu605-pending="$1" 2>/dev/null; printf '%s %s\n' "$1" "$R" > "$PF.tmp" && mv -f "$PF.tmp" "$PF"; fullsync "$PF" "$G"; }
 pend_is_set() { [ "$(nvram gu605-pending 2>/dev/null | cut -f2)" = 1 ] || [ "$(cut -d' ' -f1 "$PF" 2>/dev/null)" = 1 ]; }
 say() { echo "$(ts) $*" | tee -a "$S"; }
-finish() { say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; exit 0; }
+# [gu605-mac] with i915 owning the display (DISPLAY=kms) the machine froze 1-3 min AFTER a finished run (2026-11-10
+# 12:35, 12:38: 'metal done', then a frozen panel at full brightness): the mark stays set for 5 minutes after the run
+kms_hold() {
+  grep -q 'display: i915 owns the display' "$R/stages/stages.log" 2>/dev/null || return 0
+  pend 1; say "kms: the pending mark stays set for 5 minutes (a freeze in that time turns automatic runs off)"
+  # in the foreground: launchd ends the job's whole process group when this script exits (no AbandonProcessGroup)
+  sleep 300; pend 0; say "kms: 5 minutes up with i915 owning the display, pending mark cleared"
+}
+finish() { kms_hold; say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; exit 0; }
 # run folders are never deleted here (a few MB each); gu605-collect.sh reports their size
 
 say "GU605 auto, $(sw_vers -productVersion) ($(sw_vers -buildVersion)), boot $(sysctl -n kern.boottime | sed -E 's/.*\} //')"
