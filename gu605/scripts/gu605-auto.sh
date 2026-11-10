@@ -27,8 +27,12 @@ say() { echo "$(ts) $*" | tee -a "$S"; }
 kms_hold() {
   grep -q 'display: i915 owns the display' "$R/stages/stages.log" 2>/dev/null || return 0
   pend 1; say "kms: the pending mark stays set for 5 minutes (a freeze in that time turns automatic runs off)"
+  # [gu605-mac] an orderly restart or shutdown in those 5 minutes is not a freeze: launchd sends SIGTERM to the job
+  # first, and the mark is cleared then. WAS: cleared only after the full 5 minutes, so a normal restart 4 minutes
+  # after login turned automatic runs off for the next boot (2026-11-10 16:52).
+  trap 'pend 0; say "kms: shutdown or restart during the 5 minutes: pending mark cleared"; exit 0' TERM INT HUP
   # in the foreground: launchd ends the job's whole process group when this script exits (no AbandonProcessGroup)
-  sleep 300; pend 0; say "kms: 5 minutes up with i915 owning the display, pending mark cleared"
+  sleep 300 & wait $!; trap - TERM INT HUP; pend 0; say "kms: 5 minutes up with i915 owning the display, pending mark cleared"
 }
 finish() { kms_hold; say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; exit 0; }
 # run folders are never deleted here (a few MB each); gu605-collect.sh reports their size

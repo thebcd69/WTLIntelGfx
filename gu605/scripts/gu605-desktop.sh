@@ -105,8 +105,8 @@ case "$cu" in ""|root|_*) ;; *)
              ""|root|_*) MODE=now; say "logged out while waiting: restarting now" ;;
              *) if [ "${idle:-0}" -ge "$need" ]; then
                   say "automatic login, no input for ${idle}s (after ${waited}s): ${nsec}s notice"
-                  notify "$cu" "${nsec} sn sonra ekran bir kez kararacak ve oturum kapanacak (masaüstü Intel GPU'ya geçiyor). Klavye/izleme dörtgenine dokunursan iptal olur ve çıkış yaptığında olur."
-                  sleep "$nsec"; idle2=$(idle_s)
+                  [ "$nsec" -gt 0 ] && notify "$cu" "${nsec} sn sonra ekran bir kez kararacak ve oturum kapanacak (masaüstü Intel GPU'ya geçiyor). Klavye/izleme dörtgenine dokunursan iptal olur ve çıkış yaptığında olur."
+                  sleep "$nsec"; idle2=$(idle_s); [ "$nsec" -gt 0 ] || idle2=0
                   if [ "${idle2:-0}" -ge "$nsec" ]; then MODE=now; say "automatic login, no input: restarting now"
                   else say "input during the notice (idle ${idle2:-?}s): waiting for the next logout instead"; fi
                 else say "input for ${waited}s: waiting for the next logout instead"; fi ;;
