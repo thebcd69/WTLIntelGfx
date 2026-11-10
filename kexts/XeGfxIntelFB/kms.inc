@@ -14,7 +14,7 @@
     IOFBInterruptProc fConnProc = nullptr; OSObject *fConnTarget = nullptr; void *fConnRef = nullptr;
     volatile bool fConnEnabled = false; int fConnToken = 0; unsigned fConnFired = 0;
     thread_call_t fKmsCall = nullptr; IOLock *fKmsLock = nullptr;
-    bool fKmsUp = false, fExternal = false; unsigned fKmsHot = ~0u;
+    bool fKmsUp = false, fExternal = false; unsigned fKmsHot = ~0u, fKmsUpTries = 0;
     IODisplayModeID fBootId = 0, fCurId = 0; IOIndex fBootDepth = 0;
     uint32_t fBootW = 0, fBootH = 0, fBootHz16 = 0, fStartHz16 = 0, fIntMhz = 0;
     XifbKmsMode fKm[kKmsMax]; int fKmN = 0; bool fKmOffer[kKmsMax]; char fConnName[16] = {};
@@ -173,13 +173,31 @@
     void kmsUpNow() {
         if (!kmsCursorArm("i915 took the display")) kmsCursorOff();
         IODisplayModeID id = 0; IOIndex depth = 0; IODisplayModeInformation bi; bzero(&bi, sizeof bi);
-        if (IONDRVFramebuffer::getCurrentDisplayMode(&id, &depth) != kIOReturnSuccess ||
-            IONDRVFramebuffer::getInformationForDisplayMode(id, &bi) != kIOReturnSuccess || !bi.nominalWidth) {
-            XIFBLOG("display path: i915 is up, but the boot mode is unreadable: staying on the boot mode"); fKmsUp = true; return;
+        // [gu605-mac] WAS: one try, then "staying on the boot mode" for the whole boot with the bridge off (2026-11-10
+        // 15:40, monitor plugged in at power-on: the firmware mirrored 2560x1440 on both, i915 kept both pipes, and
+        // the monitor never got the picture). Now: the console's geometry from the platform when the NDRV has no
+        // mode information, and a retry every second for 30 s before giving up.
+        const IOReturn r1 = IONDRVFramebuffer::getCurrentDisplayMode(&id, &depth);
+        const IOReturn r2 = r1 ? (IOReturn)kIOReturnNotReady : IONDRVFramebuffer::getInformationForDisplayMode(id, &bi);
+        uint32_t bw = bi.nominalWidth, bh = bi.nominalHeight; bool fromConsole = false;
+        if (r1 == kIOReturnSuccess && id && (r2 != kIOReturnSuccess || !bw)) {
+            PE_Video v; bzero(&v, sizeof v);
+            if (getPlatform() && getPlatform()->getConsoleInfo(&v) == kIOReturnSuccess && v.v_width && v.v_height) {
+                bw = (uint32_t)v.v_width; bh = (uint32_t)v.v_height; fromConsole = true;
+            }
         }
+        if (r1 != kIOReturnSuccess || !id || !bw || !bh) {
+            if (fKmsUpTries < 30) {
+                if (!(fKmsUpTries % 10)) XIFBLOG("display path: i915 is up, boot mode not readable yet (mode 0x%x: 0x%x, info 0x%x %ux%u): trying again", (unsigned)id, r1, r2, bw, bh);
+                fKmsUpTries++; return;   // fKmsUp stays false: kmsTick calls this again in a second
+            }
+            XIFBLOG("display path: i915 is up, but the boot mode is unreadable (mode 0x%x: 0x%x, info 0x%x): staying on the boot mode", (unsigned)id, r1, r2);
+            fKmsUp = true; return;
+        }
+        if (fromConsole) XIFBLOG("display path: boot mode 0x%x without mode information (0x%x): the console's %ux%u", (unsigned)id, r2, bw, bh);
         XifbKmsMode cur; bzero(&cur, sizeof cur);
         IOLockLock(fKmsLock);
-        fBootId = id; fBootDepth = depth; fBootW = bi.nominalWidth; fBootH = bi.nominalHeight;
+        fBootId = id; fBootDepth = depth; fBootW = bw; fBootH = bh;
         fBootHz16 = fStartHz16 ? fStartHz16 : (bi.refreshRate ? bi.refreshRate : (60u << 16));
         bcopy(fEdid, fEdidInt, sizeof fEdidInt); fEdidIntLen = fEdidLen;
         strlcpy(fConnName, "eDP-1", sizeof fConnName);
@@ -270,14 +288,22 @@
         if (!b) for (int i = 0; i < fKmN && !b; i++) if (fKmOffer[i]) b = &fKm[i];
         return b;
     }
-    // the i915 mode that IS the boot mode (the boot raster at the firmware's rate; not offered under an ID of its own)
-    const XifbKmsMode *kmsBootKm() const {
-        if (!fKmsUp || fExternal || !fBootId) return nullptr;
+    // the i915 mode that IS the boot mode (the boot raster at the firmware's rate; not offered under an ID of its own).
+    // A boot raster below the panel's (monitor plugged in at power-on: 2560x1440) is the panel's fixed mode through
+    // the panel fitter: its timing with the boot raster (xg_kms_set does the same for the commit)
+    bool kmsBootKm(XifbKmsMode *out) const {
+        if (!fKmsUp || fExternal || !fBootId || !out) return false;
+        const XifbKmsMode *fit = nullptr; uint32_t bd = ~0u;
         for (int i = 0; i < fKmN; i++) {
-            const uint32_t hz = kmsHz16(fKm[i]), d = hz > fBootHz16 ? hz - fBootHz16 : fBootHz16 - hz;
-            if (fKm[i].w == fBootW && fKm[i].h == fBootH && !(fKm[i].flags & 0x10) && fKm[i].mhz && d <= (3u << 15)) return &fKm[i];
+            const XifbKmsMode &m = fKm[i];
+            if ((m.flags & 0x10) || !m.mhz) continue;
+            const uint32_t hz = kmsHz16(m), d = hz > fBootHz16 ? hz - fBootHz16 : fBootHz16 - hz;
+            if (m.w == fBootW && m.h == fBootH && d <= (3u << 15)) { *out = m; return true; }
+            if (m.w >= fBootW && m.h >= fBootH && m.hss >= fBootW && m.vss >= fBootH && d < bd) { bd = d; fit = &m; }
         }
-        return nullptr;
+        if (!fit || bd > (3u << 15)) return false;
+        *out = *fit; out->w = fBootW; out->h = fBootH;
+        return true;
     }
     static void kmsDetailed(const XifbKmsMode *km, IODetailedTimingInformationV2 &d) {
         bzero(&d, sizeof d);
@@ -377,11 +403,12 @@ public:
     IOReturn getTimingInfoForDisplayMode(IODisplayModeID mode, IOTimingInformation *info) override {
         const XifbKmsMode *km = kmsMode(mode);
         if (!km && info && mode == fBootId) {
-            if (const XifbKmsMode *bk = kmsBootKm()) {
+            XifbKmsMode bk;
+            if (kmsBootKm(&bk)) {
                 IOReturn r = IONDRVFramebuffer::getTimingInfoForDisplayMode(mode, info);   // the NDRV's timing ID stays
                 if (r != kIOReturnSuccess) return r;
                 info->flags |= kIODetailedTimingValid;
-                kmsDetailed(bk, info->detailedInfo.v2);
+                kmsDetailed(&bk, info->detailedInfo.v2);
                 return kIOReturnSuccess;
             }
         }

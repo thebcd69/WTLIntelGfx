@@ -352,6 +352,34 @@ xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, i
 	}
 	if (best != NULL)
 		drm_mode_copy(&mode, best);
+	/*
+	 * [gu605-mac] The panel below its native raster, through i915's panel fitter. The firmware sizes the boot
+	 * framebuffer for the mode it lights: with a monitor on the left USB-C at power-on it mirrors 2560x1440 on both
+	 * (pipe A eDP scaled, pipe B DP-1), so the boot framebuffer is 2560x1440 for the whole boot, and the panel's
+	 * 2560x1600 never fits it (2026-11-10 15:40). eDP takes any raster up to its fixed mode at the fixed mode's
+	 * refresh (intel_panel_compute_config replaces the timings, intel_panel_fitting scales pipe_src into it), the
+	 * same way the firmware drove it: the fixed mode nearest the refresh asked for, with the smaller raster.
+	 */
+	if (best == NULL && w != 0 && connector->connector_type == DRM_MODE_CONNECTOR_eDP) {
+		list_for_each_entry(m, &connector->modes, head) {
+			if (m->hdisplay < w || m->vdisplay < h || (m->flags & DRM_MODE_FLAG_INTERLACE) ||
+			    m->hsync_start < w || m->vsync_start < h)
+				continue;
+			d = mhz ? (unsigned int)abs((int)xg_mode_mhz(m) - (int)mhz) : ~0u - xg_mode_mhz(m);
+			if (d < bd) {
+				bd = d;
+				best = m;
+			}
+		}
+		if (best != NULL) {
+			drm_mode_copy(&mode, best);
+			mode.hdisplay = w;
+			mode.vdisplay = h;
+			mode.type &= ~DRM_MODE_TYPE_PREFERRED;
+			drm_mode_set_name(&mode);
+			drm_mode_set_crtcinfo(&mode, 0);
+		}
+	}
 	mutex_unlock(&dev->mode_config.mutex);
 	if (best == NULL || connector->status != connector_status_connected) {
 		snprintf(msg, msglen, "%s %s: no mode %ux%u near %u mHz", name, xg_status(connector->status), w, h, mhz);
