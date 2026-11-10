@@ -224,6 +224,29 @@ public:
         setProperty("XeGfxKmsMode", (unsigned long long)mode, 32);
         return kIOReturnSuccess;
     }
+    // IONDRVFramebuffer::connectFlags asks the boot NDRV for the mode's timing (cscGetModeTiming). The NDRV knows the
+    // firmware's mode only, so every i915 mode ID failed there, and IOFramebuffer's getInformationForDisplayMode
+    // user-client call returns that error to CoreDisplay. With the monitor on the left USB-C (2026-11-10 14:11, i915
+    // had committed DP-1 2560x1440 239.972 Hz): "IOFBSetDisplayModeAndDepth: Setting mode 0x10000 ... Failed to
+    // obtain mode info", "Setting main display offline", WindowServer on a virtual display, one still frame on the
+    // monitor. The flags replace the mode's safety flags (valid, safe, default) in that call.
+    IOReturn connectFlags(IOIndex ci, IODisplayModeID mode, IOOptionBits *flags) override {
+        if (!kmsMode(mode)) return IONDRVFramebuffer::connectFlags(ci, mode, flags);
+        if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag | (fExternal && mode == fCurId ? kDisplayModeDefaultFlag : 0);
+        return kIOReturnSuccess;
+    }
+    // the boot NDRV's preferred configuration is the firmware's mode, which is not in the list while a monitor has
+    // the picture; and it cannot remember an i915 mode
+    IOReturn getStartupDisplayMode(IODisplayModeID *mode, IOIndex *depth) override {
+        if (!fKmsUp || !fBootId || !fExternal) return IONDRVFramebuffer::getStartupDisplayMode(mode, depth);
+        if (mode) *mode = fCurId;
+        if (depth) *depth = fBootDepth;
+        return kIOReturnSuccess;
+    }
+    IOReturn setStartupDisplayMode(IODisplayModeID mode, IOIndex depth) override {
+        if (kmsMode(mode)) return kIOReturnSuccess;
+        return IONDRVFramebuffer::setStartupDisplayMode(mode, depth);
+    }
     IOReturn getPixelInformation(IODisplayModeID mode, IOIndex depth, IOPixelAperture aperture, IOPixelInformation *pi) override {
         const XifbKmsMode *km = kmsMode(mode);
         IOReturn r = IONDRVFramebuffer::getPixelInformation(km ? fBootId : mode, depth, aperture, pi);
