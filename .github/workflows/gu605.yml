@@ -18,6 +18,10 @@ on:
         description: "linux-firmware tag or commit (empty = the one pinned in gu605/firmware.lock)"
         required: false
         default: ""
+      userland:
+        description: "0 = skip the Mesa ANV build under Rosetta (about 30 minutes); for a kext-only package"
+        required: false
+        default: "1"
 permissions:
   contents: write
 concurrency:
@@ -232,6 +236,7 @@ jobs:
   # Mesa ANV for the x86_64 Mac without an Intel runner: the same script on an Apple-silicon runner under Rosetta
   # (MacPorts x86_64 archives, every tool x86_64, the output checked with lipo). The pack step prefers the Intel job's.
   userland-rosetta:
+    if: github.event.inputs.userland != '0'
     runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
     timeout-minutes: 240
     steps:
