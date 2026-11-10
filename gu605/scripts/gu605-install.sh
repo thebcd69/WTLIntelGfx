@@ -36,7 +36,8 @@ OLDINS=$(kmutil inspect -a x86_64 -A "$KC" 2>/dev/null || true)
 [ ! -f "$KC" ] || [ -n "$OLDINS" ] || die "cannot inspect the current $KC: nothing changed"
 # every kext in $EXT that is in the current collection must be in the new one (NullMoth's above all)
 # a whole bundle ID in kmutil's text, not a prefix of a longer one (com.nullmoth.NVRM vs com.nullmoth.NVRMFB)
-has_id() { printf '%s\n' "$1" | grep -Eq "(^|[^A-Za-z0-9._-])$(printf '%s' "$2" | sed 's/[.]/[.]/g')([^A-Za-z0-9._-]|\$)"; }
+# (a here-string: printf | grep -q under pipefail fails at random when grep leaves early and printf gets SIGPIPE)
+has_id() { grep -Eq "(^|[^A-Za-z0-9._-])$(printf '%s' "$2" | sed 's/[.]/[.]/g')([^A-Za-z0-9._-]|\$)" <<< "$1"; }
 KEEP=""
 for x in "$EXT"/*.kext; do
   [ -f "$x/Contents/Info.plist" ] || continue

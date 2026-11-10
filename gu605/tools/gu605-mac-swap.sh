@@ -17,7 +17,9 @@ build_kc() {  # <repository> <output kc>
     || { tail -20 "$2.log"; die "kmutil create failed ($2.log)"; }
   [ -s "$2" ] || die "kmutil produced no collection"
   local ins id; ins=$(kmutil inspect -a x86_64 -A "$2" 2>/dev/null) || die "cannot inspect $2"
-  for id in $WANT; do printf '%s\n' "$ins" | grep -Eq "(^|[^A-Za-z0-9.])${id//./\\.}([^A-Za-z0-9.]|$)" || { tail -20 "$2.log"; die "$id missing from $2"; }; done
+  # a here-string, not printf | grep -q: with pipefail, grep -q leaving at the first match sends printf SIGPIPE and the
+  # check failed on a bundle ID that WAS in the collection (2026-11-10 15:55, com.nullmoth.NVRMAGDC)
+  for id in $WANT; do grep -Eq "(^|[^A-Za-z0-9.])${id//./\\.}([^A-Za-z0-9.]|$)" <<< "$ins" || { tail -20 "$2.log"; die "$id missing from $2"; }; done
 }
 live_kc() {
   local T; T=$(mktemp -d /var/tmp/gu605-mac.XXXX)
