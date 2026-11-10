@@ -220,7 +220,7 @@
             if (e) IOFree(e, 1024);
             XifbKmsMode cur; bzero(&cur, sizeof cur);
             IOLockLock(fKmsLock);
-            fExternal = true; strlcpy(fConnName, ext, sizeof fConnName);
+            fExternal = true; gXifbExternal = true; strlcpy(fConnName, ext, sizeof fConnName);
             kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); fCurId = kmsIdFor(cur);
             IOLockUnlock(fKmsLock);
             XIFBLOG("display path: %s has the picture (%d modes, %ux%u, EDID %d B); the panel is off", ext, en, cur.w, cur.h, fEdidLen);
@@ -229,7 +229,7 @@
             if (!kmsCommit("eDP-1", fBootW, fBootH, fIntMhz)) return;
             XifbKmsMode cur; bzero(&cur, sizeof cur);
             IOLockLock(fKmsLock);
-            fExternal = false; strlcpy(fConnName, "eDP-1", sizeof fConnName);
+            fExternal = false; gXifbExternal = false; strlcpy(fConnName, "eDP-1", sizeof fConnName);
             bcopy(fEdidInt, fEdid, sizeof fEdidInt); fEdidLen = fEdidIntLen;
             kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); fCurId = kmsIdFor(cur);
             IOLockUnlock(fKmsLock);

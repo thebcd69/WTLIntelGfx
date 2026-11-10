@@ -43,10 +43,23 @@ static unsigned xifbGuardStarts(IORegistryEntry *o)
     if (v) v->release();
     return n;
 }
+// [gu605-mac] A tripped guard costs ONE boot, not every boot until someone clears NVRAM. On GU605 a declined
+// XeGfxIntelFB leaves Eco without a usable framebuffer (WindowServer asserts in CGXMappedDisplayStart, verbose screen
+// forever), and two forced power-offs in the unsupported Standard mode were enough to trip it (2026-11-10: Eco stayed
+// dead until Ultimate + nvram xeintelfb-starts=%00). So the boot that finds the guard tripped declines for all of
+// that boot and writes the count back to 0: the boot after it starts normally again.
 static bool xifbGuardTripped()
 {
+    static bool declined;
+    if (declined) return true;
     IORegistryEntry *o = IORegistryEntry::fromPath("/options", gIODTPlane); if (!o) return false;
-    bool t = xifbGuardStarts(o) >= 2; o->release(); return t;
+    bool t = xifbGuardStarts(o) >= 2;
+    if (t) {
+        declined = true;
+        unsigned char z = 0;
+        if (OSData *d = OSData::withBytes(&z, 1)) { o->setProperty(XIFB_GUARD_VAR, d); d->release(); }
+    }
+    o->release(); return t;
 }
 static void xifbGuardCount()
 {

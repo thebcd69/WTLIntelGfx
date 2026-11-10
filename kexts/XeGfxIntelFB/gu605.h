@@ -189,6 +189,9 @@ static void xifbBacklightProbe(XifbBacklight *b, const uint8_t *edid, int edidLe
 // function, and the direct AUX helpers in this file must stay quiet (they would race i915's own AUX traffic).
 // Boot-arg -xeintelfbnokms keeps this framebuffer on its own paths.
 static IOService *gXifbKms;   // retained once ready; XeGfx cannot unload after stage 4 anyway
+// set while the monitor on the left USB-C has the picture (the panel is off): the panel's backlight handler must not
+// give that monitor's IODisplay a brightness parameter (nm_backlight.h setDisplay)
+static volatile bool gXifbExternal;
 static IOService *xifbKmsService()
 {
     if (gXifbKms) return gXifbKms;

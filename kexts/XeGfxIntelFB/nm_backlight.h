@@ -132,6 +132,12 @@ public:
     // only accepts parameters listed there
     bool setDisplay(IODisplay *display) override {
         if (!display) return false;
+        // [gu605-mac] display path: one framebuffer drives whichever display has the picture, and IODisplay searches
+        // it for parameter handlers on every connect. With the monitor on the left USB-C, this handler gave the
+        // monitor's AppleDisplay "brightness" (2026-11-10 15:18: BetterDisplay listed the PG27AQDM as an Apple display
+        // with native brightness and never sent a DDC request, XeGfxDdc n 0; the slider drove the dark panel's
+        // backlight). The monitor's brightness is DDC/CI (ddc.inc); the panel's handler is for the panel only.
+        if (gXifbExternal) { XIFBLOG("gu605 backlight: %s is the external monitor: no brightness parameters from the panel's backlight", display->getName()); return false; }
         OSObject *old = display->copyProperty(gIODisplayParametersKey);
         OSDictionary *cur = OSDynamicCast(OSDictionary, old);
         OSDictionary *params = cur ? OSDictionary::withDictionary(cur) : OSDictionary::withCapacity(4);
