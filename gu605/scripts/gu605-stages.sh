@@ -35,6 +35,10 @@ if ! loaded 'org\.watchthelight\.XeGfx'; then
   kmutil load -b org.watchthelight.XeGfx > "$OUT/kmutil-load.txt" 2>&1 || { say "XeGfx load failed: $(tail -3 "$OUT/kmutil-load.txt")"; exit 1; }
 fi
 sysctl -w debug.xegfx_wdog=60 > /dev/null 2>&1 || true
+# gu605.conf XEGFX_ENV=name=value[ name=value...]: extra pairs for debug.xegfx_env, added once before stage 1 fetches the
+# tunables (e.g. compat.linuxkpi.drm_debug=4: i915's KMS debug messages in debug.xegfx_log)
+xe=$(conf XEGFX_ENV ""); if [ -n "$xe" ] && [ "$(sysctl -n debug.xegfx_stage 2>/dev/null)" = 0 ]; then
+  env=$(sysctl -n debug.xegfx_env); case " $env " in *" $xe "*) ;; *) sysctl -w debug.xegfx_env="$env $xe" > /dev/null; say "env (XEGFX_ENV): $(sysctl -n debug.xegfx_env)" ;; esac; fi
 snap stage0
 read -r -a R <<< "$(results)"
 [ "${#R[@]}" = 8 ] || { say "cannot read debug.xegfx_results"; exit 1; }

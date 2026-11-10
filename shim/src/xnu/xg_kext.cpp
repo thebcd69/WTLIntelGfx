@@ -1250,6 +1250,29 @@ xegfx_kms_bl_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
 	return r < 0 ? -r : 0;
 }
 
+/*
+ * debug.xegfx_tunables=1: the static tunables again from debug.xegfx_env as it is now (xg_sysctl_reload_tunables).
+ * For the ones read live, above all compat.linuxkpi.drm_debug (4 = KMS: modeset, link training and hotplug in
+ * debug.xegfx_log): a display problem can be looked at in the boot it happens in. i915 copied its own parameters at
+ * probe, so those do not change. Reads the count of the last fetch.
+ */
+static int
+xegfx_tunables_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
+{
+	static int last;
+	int v = last, err = sysctl_handle_int(nullptr, &v, 0, req);
+
+	if (err || !req->newptr)
+		return err;
+	if (gStage < 1 || gRunning)
+		return EBUSY;
+	last = xg_sysctl_reload_tunables();
+	IOLog("XeGfx: %d tunables fetched again; env: %s\n", last, xg_env);
+	return 0;
+}
+
+SYSCTL_PROC(_debug, OID_AUTO, xegfx_tunables, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, nullptr, 0, xegfx_tunables_sysctl,
+    "I", "write 1: fetch the tunables again from debug.xegfx_env (drm_debug and other live ones)");
 SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_sysctl, "A",
     "GU605 display path: connectors, validated modes, link, DSC, backlight");
 SYSCTL_PROC(_debug, OID_AUTO, xegfx_kms_set, CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_LOCKED, nullptr, 0, xegfx_kms_set_sysctl,
@@ -1264,6 +1287,7 @@ static struct sysctl_oid *const gOids[] = {
 	&sysctl__debug_xegfx_trace,
 	&sysctl__debug_xegfx_spin,
 	&sysctl__debug_xegfx_kms, &sysctl__debug_xegfx_kms_set, &sysctl__debug_xegfx_kms_bl,
+	&sysctl__debug_xegfx_tunables,
 };
 
 /* Linux's struct va_format, the argument of "%pV" */
