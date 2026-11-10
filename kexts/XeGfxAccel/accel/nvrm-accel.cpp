@@ -1428,7 +1428,7 @@ static void nvAccelIopHome(IOService *fb, unsigned head);
 // ran at any point of it, so the panel showed the top of one frame over the bottom of the last: full-row bands while
 // scrolling. The copy now starts in the pipe's vblank and runs as one bulk copy that stays ahead of the scan.
 static int gIopVblSync = 1;
-static int gIopCopyUs, gIopCopyUsMax, gIopVblWaitUs, gIopVblPipe = -1;
+static int gIopCopyUs, gIopCopyUsMax, gIopVblWaitUs, gIopVblPipe = -1, gIopSizeLogs;
 static SInt64 gCntIopVblHit, gCntIopVblMiss;
 SYSCTL_INT(_debug, OID_AUTO, nvaccel_iop_vblsync, CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_KERN, &gIopVblSync, 0,
            "1 = copy an Intel panel frame at the start of its vblank, in one bulk copy; 0 = the old word copy at any time");
@@ -1703,10 +1703,28 @@ IOReturn NVDisplayPipe::performTransaction(IOAccelDisplayPipeTransaction2 *txn)
     q.version = NVRM_VRAM_ABI_VERSION;
     IOReturn ret = a->askFramebufferForScanout(&q, fb);
     if (ret != kIOReturnSuccess || !q.kva || q.pitch < 4 || !q.height) NVIOP_FAIL(kIOReturnNotReady, "framebuffer would not describe its scanout (0x%x kva %p pitch %u)", (unsigned)ret, q.kva, q.pitch);
-    if (w != q.width || h != q.height) NVIOP_FAIL(kIOReturnBadArgument, "source %ux%u is not the scanout's %ux%u", w, h, q.width, q.height);
+#ifdef NMX_XEGFX
+    // [gu605-mac] the Intel head under i915 (display path): the boot framebuffer stays the scanout buffer at the
+    // panel's 2560x1600, and a monitor on the left USB-C shows its top-left corner at its own mode (i915's plane size,
+    // e.g. 2560x1440). WindowServer composites at the monitor's size, so a smaller source is copied into that corner.
+    // WAS: refused, and every frame copied before the zero-copy flip came on failed (2026-11-10 15:27, 680 failures:
+    // only the hardware cursor moved over a still picture on the monitor). A larger source is cut to the scanout.
+    if (head == 4 && (w != q.width || h != q.height)) {
+        if (gIopSizeLogs < 4) { gIopSizeLogs++; ALOG("iop: source %ux%u into the %ux%u scanout (its top-left corner)", w, h, q.width, q.height); }
+        if (w > q.width) w = q.width;
+        if (h > q.height) h = q.height;
+    }
+#endif
+    if (w != q.width || h != q.height) {
+#ifdef NMX_XEGFX
+        if (head != 4)
+#endif
+        NVIOP_FAIL(kIOReturnBadArgument, "source %ux%u is not the scanout's %ux%u", w, h, q.width, q.height);
+    }
 
     nvAccelIopHome(fb, head);
-    const unsigned words = (((pitch < q.pitch) ? pitch : q.pitch) & ~3u) / 4;
+    unsigned words = (((pitch < q.pitch) ? pitch : q.pitch) & ~3u) / 4;
+    if (words > w) words = w;
     const unsigned spr = pitch / 4, dpr = q.pitch / 4;
     volatile unsigned int *d = (volatile unsigned int *)q.kva;
 #ifdef NMX_XEGFX
@@ -1716,7 +1734,7 @@ IOReturn NVDisplayPipe::performTransaction(IOAccelDisplayPipeTransaction2 *txn)
         nvXeIopCapture(d, dpr, w, h, 3);   // anything written into the panel during the vblank (a kernel cursor) shows here
         const uint64_t t0 = mach_absolute_time();
         if (gIopClflush) nvXeIopClflush(src, (size_t)h * pitch);
-        if (pitch == q.pitch) memcpy((void *)d, (const void *)src, (size_t)h * pitch);
+        if (pitch == q.pitch && words * 4 == pitch) memcpy((void *)d, (const void *)src, (size_t)h * pitch);
         else for (unsigned y = 0; y < h; y++)
             memcpy((void *)(d + (unsigned long)y * dpr), (const void *)(src + (unsigned long)y * spr), (size_t)words * 4);
         gIopCopyUs = (int)nvXeUs(t0);
