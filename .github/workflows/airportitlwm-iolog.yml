@@ -1,9 +1,13 @@
 # airportitlwm-iolog.yml (gu605-mac, 2026-11-10): laobamac/itlwm's AirportItlwm-Sequoia (7204c69, the build that
 # starts on the GU605's Intel 8086:7E40 and then leaves the card without a word) rebuilt with its log macro on IOLog
 # instead of kprintf, so its messages reach the unified log (`log show`) on this machine. Nothing else changed.
-# Publishes prerelease airportitlwm-iolog-<sha>. Run: gh workflow run airportitlwm-iolog.yml --ref gu605-mac
+# Publishes prerelease airportitlwm-iolog-<sha>. Runs on a push that changes this file (workflow_dispatch needs the
+# file on the default branch, which this branch never writes to).
 name: airportitlwm-iolog
 on:
+  push:
+    branches: [gu605-mac]
+    paths: ['.github/workflows/airportitlwm-iolog.yml']
   workflow_dispatch:
     inputs:
       ref:
@@ -19,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: laobamac/itlwm
-          ref: ${{ github.event.inputs.ref }}
+          ref: ${{ github.event.inputs.ref || '7204c69' }}
           path: itlwm
           fetch-depth: 0
       - uses: actions/checkout@v4
