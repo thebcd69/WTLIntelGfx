@@ -233,6 +233,12 @@ xg_kms_dump(char *buf, unsigned long len)
 	drm_for_each_connector_iter(connector, &it)
 		connector->funcs->fill_modes(connector, dev->mode_config.max_width, dev->mode_config.max_height);
 	drm_connector_list_iter_end(&it);
+	/*
+	 * drm_modeset_lock_all() takes mode_config.mutex itself (drm_modeset_lock.c) and drm_modeset_unlock_all() drops
+	 * it: holding it here as well recursed on the non-recursive sx and panicked the GU605 at the first
+	 * 'sysctl debug.xegfx_kms' after a KMS stage 4 (2026-11-09 17:06, xg_kms_dump -> drm_modeset_lock_all -> _sx_xlock).
+	 */
+	mutex_unlock(&dev->mode_config.mutex);
 	drm_modeset_lock_all(dev);
 	fb = xg_kms_bootfb(dev);
 	xg_out(&b, "xegfx-kms hotplugs %u client %d cdclk %u kHz", xg_kms_hotplugs, xg_kms_client_up,
@@ -259,7 +265,6 @@ xg_kms_dump(char *buf, unsigned long len)
 		xg_dump_connector(&b, connector);
 	drm_connector_list_iter_end(&it);
 	drm_modeset_unlock_all(dev);
-	mutex_unlock(&dev->mode_config.mutex);
 	return ((int)b.off);
 }
 

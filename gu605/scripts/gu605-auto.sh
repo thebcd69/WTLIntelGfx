@@ -6,12 +6,17 @@
 #   standard (iGPU + NVIDIA):   STANDARD_LEVEL (default probe: read-only)
 # Levels: off | probe (stages 1-2, read-only) | gt (to 6: GuC, engines) | metal (to 7 + Metal test in a test process)
 #         | desktop (metal + WindowServer on the Intel GPU, at the login window only)
-# Safety: nvram gu605-pending=1 is set before the first stage that can hang and cleared when the run is confirmed; a
+# Safety: the pending mark (nvram gu605-pending=1 and the file $G/pending-run) is set before the first stage that can hang and cleared when the run is confirmed; a
 # boot that finds it still set (hang, panic, power button) does nothing and writes $G/autostart-off. Off switches:
 # boot-arg -xegfxnoauto (this boot), -xegfxoff (kext idle), file $G/autostart-off, Safe Mode.
 set -uo pipefail
 . "$(dirname "$0")/gu605-common.sh"
 R=$L/boot-$(date +%Y%m%d-%H%M%S); mkdir -p "$R"; S=$R/summary.txt
+# [gu605-mac] the pending mark is kept in a file as well: on this machine an nvram write is not on the flash before a
+# panic or the power button (2026-11-09 17:06: panic in stage 4 with gu605-pending=1, next boot read 0 and ran again)
+PF=$G/pending-run
+pend() { nvram gu605-pending="$1" 2>/dev/null; printf '%s %s\n' "$1" "$R" > "$PF.tmp" && mv -f "$PF.tmp" "$PF"; sync; }
+pend_is_set() { [ "$(nvram gu605-pending 2>/dev/null | cut -f2)" = 1 ] || [ "$(cut -d' ' -f1 "$PF" 2>/dev/null)" = 1 ]; }
 say() { echo "$(ts) $*" | tee -a "$S"; }
 finish() { say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; exit 0; }
 # run folders are never deleted here (a few MB each); gu605-collect.sh reports their size
@@ -49,8 +54,8 @@ if [ -x "$G/tools/xeddcprobe" ]; then say "ddc: $("$G/tools/xeddcprobe" enable "
 has_bootarg -xegfxoff && finish "boot-arg -xegfxoff: XeGfx idle"
 say "level: $LEVEL"
 [ "$LEVEL" = off ] && finish "level off"
-if [ "$(nvram gu605-pending 2>/dev/null | cut -f2)" = 1 ]; then
-  nvram gu605-pending=0; touch "$G/autostart-off"
+if pend_is_set; then
+  prev=$(cut -d' ' -f2- "$PF" 2>/dev/null); pend 0; touch "$G/autostart-off"; say "unconfirmed run: ${prev:-?}"
   finish "the previous automatic run was never confirmed (hang, panic or power button): automatic runs are now OFF. Run gu605-collect.sh and send the report; re-enable with: sudo rm $G/autostart-off"
 fi
 case "$LEVEL" in probe) T=2 ;; gt) T=6 ;; metal|desktop) T=7 ;; *) finish "unknown level $LEVEL" ;; esac
@@ -58,22 +63,22 @@ case "$LEVEL" in probe) T=2 ;; gt) T=6 ;; metal|desktop) T=7 ;; *) finish "unkno
 bash "$G/gu605-stages.sh" 2 "$R/stages" || finish "stages 1-2 failed (see stages/)"
 { echo "== display as the firmware left it (stage 2)"; cat "$R/stages/display-decoded.txt" 2>/dev/null; } >> "$S"
 [ $T -le 2 ] && finish "probe done"
-nvram gu605-pending=1; sync
-if ! bash "$G/gu605-stages.sh" "$T" "$R/stages"; then nvram gu605-pending=0; finish "stages to $T failed (see stages/)"; fi
+pend 1
+if ! bash "$G/gu605-stages.sh" "$T" "$R/stages"; then pend 0; finish "stages to $T failed (see stages/)"; fi
 say "stages to $T passed"
-if [ "$LEVEL" = gt ]; then nvram gu605-pending=0; finish "gt done"; fi
-if [ ! -f "$XU/libvulkan_intel.dylib" ]; then nvram gu605-pending=0; finish "no Mesa ANV installed ($XU): Metal not tried"; fi
+if [ "$LEVEL" = gt ]; then pend 0; finish "gt done"; fi
+if [ ! -f "$XU/libvulkan_intel.dylib" ]; then pend 0; finish "no Mesa ANV installed ($XU): Metal not tried"; fi
 bash "$G/gu605-metal-check.sh" "$R/metal"; mc=$?
-nvram gu605-pending=0
+pend 0
 [ $mc = 0 ] || finish "Metal check failed (see metal/)"
 [ "$LEVEL" = metal ] && finish "metal done"
 # desktop: gu605-desktop.sh decides when WindowServer restarts (login window, automatic login left idle, or the next
 # logout: exit 10, armed and waiting)
-nvram gu605-pending=1; sync
+pend 1
 bash "$G/gu605-desktop.sh" "$R/desktop"; dr=$?
 if [ $dr = 10 ]; then
   # a shutdown while waiting is not a failed run: the pending mark is set again only when WindowServer restarts
-  nvram gu605-pending=0; sync
+  pend 0
   wmin=$(conf DESKTOP_WAIT_MIN 120); old=$(pgrep -x WindowServer | head -1)
   say "desktop armed; waiting up to $wmin min for the next logout (WindowServer $old)"
   # [gu605-mac] macOS 15 keeps WindowServer across a logout (2026-11-05 13:05: logged out, WindowServer still 157), so a
@@ -85,17 +90,17 @@ if [ $dr = 10 ]; then
     sleep 10; done
   now=$(pgrep -x WindowServer | head -1)
   [ -n "$now" ] && [ "$now" != "$old" ] || finish "armed, no logout within $wmin min: the desktop stayed on the firmware framebuffer this boot"
-  nvram gu605-pending=1; sync
+  pend 1
   nohup bash "$R/desktop/guard.sh" "$AL" "$R/desktop/guard.log" > /dev/null 2>&1 < /dev/null & disown
   echo "$(date +%T) WindowServer start #1 (pid $now, after logout)" >> "$R/desktop/guard.log"
   say "logout seen: WindowServer $old -> $now"
-elif [ $dr != 0 ]; then nvram gu605-pending=0; finish "desktop step stopped before the restart (see desktop/)"; fi
+elif [ $dr != 0 ]; then pend 0; finish "desktop step stopped before the restart (see desktop/)"; fi
 say "WindowServer on the Intel GPU; confirming in 3 minutes"
 sleep 180
 frames=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); frames=${frames:-0}
 starts=$(grep -c 'WindowServer start #' "$R/desktop/guard.log" 2>/dev/null); starts=${starts:-0}
 if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
-  nvram gu605-pending=0
+  pend 0
   say "confirmed: $frames frames on the panel, $starts WindowServer restart(s)"
   # zero-copy flip (samwu07: 602 flips, 0 copies), only on a confirmed desktop, off again on any trouble in a minute
   if [ "$(conf FLIP 1)" = 1 ] && [ ! -e "$G/xeflip-off" ] && ! has_bootarg -xegfxnoflip && sysctl -n debug.nvaccel_xeflip_ggtt > /dev/null 2>&1; then
@@ -125,5 +130,5 @@ if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
   sysctl debug.nvaccel_iop_ok_h4 debug.nvaccel_iop_fail debug.nvaccel_pipe_perform 2>/dev/null >> "$S"
   finish "desktop on the Intel GPU"
 fi
-nvram gu605-pending=0; touch "$G/autostart-off"
+pend 0; touch "$G/autostart-off"
 finish "desktop NOT confirmed ($frames frames, $starts WindowServer starts): automatic runs OFF; run gu605-collect.sh"
