@@ -11,6 +11,9 @@ set -uo pipefail
 R=${1:-$L/desktop-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$R"
 say() { echo "$(ts) desktop: $*" | tee -a "$R/desktop.log"; }
 die() { say "STOP: $*  (nothing was restarted)"; sync; exit 1; }
+# [gu605-mac] diagnostics only, in the background: each log show took 20-50 s here and the three of them delayed the
+# restart by ~2.5 minutes (2026-11-10 16:00-16:02). A failed check still reads the log in the foreground (die path).
+klog_bg() { local m=$1 f=$2; ( klog "$m" > "$f" 2>&1 ) < /dev/null & }
 klog() { log show --last "${1:-2m}" --style compact --predicate 'process == "kernel" AND (eventMessage CONTAINS[c] "nvaccel" OR eventMessage CONTAINS[c] "agdc" OR eventMessage CONTAINS[c] "nmx" OR eventMessage CONTAINS[c] "XeGfx" OR eventMessage CONTAINS[c] "framebuffer")' 2>/dev/null; }
 
 # NullMoth's NVAccel registers the same debug.nvaccel* names as XeGfxAccel: only one of them may run (Eco mode)
@@ -44,10 +47,10 @@ for i in $(seq 1 10); do [ "$(sysctl -n debug.xegfx_agdc)" = 1 ] && break; sleep
 
 say "3. register the panel's framebuffer"
 sysctl -w debug.nvaccelfb=1 > /dev/null || die "debug.nvaccelfb=1 failed"
-sleep 1; klog 1m > "$R/kernel-after-fb1.txt"
+sleep 1; klog_bg 1m "$R/kernel-after-fb1.txt"
 say "4. scan-out pipe"
 sysctl -w debug.nvaccelfb=3 > /dev/null || die "debug.nvaccelfb=3 failed"
-sleep 1; klog 1m > "$R/kernel-after-fb3.txt"
+sleep 1; klog_bg 1m "$R/kernel-after-fb3.txt"
 [ "$(sysctl -n debug.nvaccelfb)" = 1 ] || die "the accelerator is not armed (debug.nvaccelfb = $(sysctl -n debug.nvaccelfb))"
 if [ "$(conf WSMARK 1)" = 1 ]; then sysctl -w debug.nvaccel_surface_gpu_on=1 > /dev/null 2>&1 || say "no WindowServer marks in this XeGfxAccel"
 else sysctl -w debug.nvaccel_surface_gpu_on=0 > /dev/null 2>&1; fi
@@ -55,7 +58,7 @@ sysctl -w debug.nvaccel_iop=1 > /dev/null || die "debug.nvaccel_iop=1 failed"
 [ "$(sysctl -n debug.nvaccel_iop)" = 1 ] || die "debug.nvaccel_iop did not stay 1"
 { sysctl debug.nvaccelfb debug.nvaccel_iop debug.xegfx_agdc debug.xegfx_agdc_k5 debug.nmxaccel_headless debug.xegfx_stage 2>&1
   ioreg -l -w0 -r -c NMXAccel; ioreg -l -w0 -r -c XeGfxIntelFramebuffer; } > "$R/state-before-restart.txt" 2>&1
-klog 10m > "$R/kernel-10m.txt"; sync
+klog_bg 10m "$R/kernel-10m.txt"; sync
 
 # [gu605-mac] kern.boottime reads "{ sec = N, usec = M } date": the old sed's greedy .*sec matched "usec" and took M as
 # the boot time, so every login looked 56 years after boot and an automatic login was never recognised (2026-11-05 13:03).
@@ -63,8 +66,9 @@ klog 10m > "$R/kernel-10m.txt"; sync
 #   nobody logged in (login window)            -> now
 #   FORCE=1                                    -> now
 #   logged in, DESKTOP_LOGGED_IN=auto (default): the session is an automatic login (started within DESKTOP_AUTOLOGIN_S,
-#     default 150 s, of boot) and nobody touched keyboard or trackpad for DESKTOP_IDLE_S (default 60 s) -> a 20 s
-#     notice, then now unless there was input meanwhile; otherwise -> at the next logout
+#     default 150 s, of boot) and nobody touched keyboard or trackpad for DESKTOP_IDLE_S (default 15 s, waited for up to
+#     DESKTOP_IDLE_WAIT_S, default 180 s) -> a DESKTOP_NOTICE_S (default 10 s) notice, then now unless there was input
+#     meanwhile; otherwise -> at the next logout
 #   DESKTOP_LOGGED_IN=logout                   -> at the next logout (armed now, nothing restarted; exit 10)
 #   DESKTOP_LOGGED_IN=skip                     -> stop (the old behaviour)
 idle_s() { ioreg -r -c IOHIDSystem -d 1 2>/dev/null | awk '/"HIDIdleTime"/ {print int($NF / 1000000000); exit}'; }
@@ -87,11 +91,26 @@ case "$cu" in ""|root|_*) ;; *)
          # look older than the boot: count that session as started at boot
          [ "$login_at" -ge 0 ] || login_at=0
          say "$cu logged in ${login_at}s after boot, session ${age}s old, idle ${idle:-?}s"
-         if [ "$login_at" -le "$(conf DESKTOP_AUTOLOGIN_S 150)" ] && [ "${idle:-0}" -ge "$(conf DESKTOP_IDLE_S 60)" ]; then
-           notify "$cu" "20 sn sonra ekran bir kez kararacak ve oturum kapanacak (masaüstü Intel GPU'ya geçiyor). Klavye/izleme dörtgenine dokunursan iptal olur ve çıkış yaptığında olur."
-           sleep 20; idle2=$(idle_s)
-           if [ "${idle2:-0}" -ge 20 ]; then MODE=now; say "automatic login, no input: restarting now"
-           else say "input during the notice (idle ${idle2:-?}s): waiting for the next logout instead"; fi
+         # [gu605-mac] WAS: one look at the idle time (60 s needed), so a desktop ready 1-2 minutes after boot almost
+         # never qualified. Now: for up to DESKTOP_IDLE_WAIT_S (default 180) wait for DESKTOP_IDLE_S (default 15) without
+         # input; then a DESKTOP_NOTICE_S (default 10) notice. Input during the notice, or a session busy for the whole
+         # wait -> the next logout, as before. A logout meanwhile (login window) -> now.
+         if [ "$login_at" -le "$(conf DESKTOP_AUTOLOGIN_S 150)" ]; then
+           need=$(conf DESKTOP_IDLE_S 15); nsec=$(conf DESKTOP_NOTICE_S 10); wmax=$(conf DESKTOP_IDLE_WAIT_S 180); waited=0
+           while [ "${idle:-0}" -lt "$need" ] && [ "$waited" -lt "$wmax" ]; do
+             case "$(stat -f %Su /dev/console 2>/dev/null)" in ""|root|_*) break ;; esac
+             sleep 2; waited=$((waited + 2)); idle=$(idle_s)
+           done
+           case "$(stat -f %Su /dev/console 2>/dev/null)" in
+             ""|root|_*) MODE=now; say "logged out while waiting: restarting now" ;;
+             *) if [ "${idle:-0}" -ge "$need" ]; then
+                  say "automatic login, no input for ${idle}s (after ${waited}s): ${nsec}s notice"
+                  notify "$cu" "${nsec} sn sonra ekran bir kez kararacak ve oturum kapanacak (masaüstü Intel GPU'ya geçiyor). Klavye/izleme dörtgenine dokunursan iptal olur ve çıkış yaptığında olur."
+                  sleep "$nsec"; idle2=$(idle_s)
+                  if [ "${idle2:-0}" -ge "$nsec" ]; then MODE=now; say "automatic login, no input: restarting now"
+                  else say "input during the notice (idle ${idle2:-?}s): waiting for the next logout instead"; fi
+                else say "input for ${waited}s: waiting for the next logout instead"; fi ;;
+           esac
          fi ;;
     esac
   fi ;;

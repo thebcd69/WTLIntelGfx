@@ -43,14 +43,16 @@ for i in $(seq 1 90); do pgrep -x WindowServer > /dev/null && break; sleep 2; do
 sleep 5
 MODE=$(gpu_mode)
 say "mode: $MODE (XeGfxIntelFramebuffer $(igpu_fb_present), iGPU drives the panel $(igpu_drives_panel), NVRM live $(nvidia_live), NVIDIA PCI node $(pci_display_present 10de))"
-say "XeGfxIntelFB start: $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | awk -F'= ' '/"XeGfxIntelFB-Start"/ {print $2; exit}') | $(log show --last boot --style compact --predicate 'process == "kernel" AND eventMessage CONTAINS "IONDRVFramebuffer start"' 2>/dev/null | grep -o 'IONDRVFramebuffer start.*' | tail -1)"
-{ echo "== kexts"; kmutil showloaded --list-only 2>/dev/null | grep -E 'watchthelight|org\.local|nullmoth|thebcd69|NVPrimarySelector'
+# [gu605-mac] the kernel log is read in the background: each `log show --last boot` took 20-45 s on this machine and the
+# two of them delayed the whole run (2026-11-10 15:59: 45 s before stage 1). The ioreg line is enough to decide here.
+say "XeGfxIntelFB start: $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | awk -F'= ' '/"XeGfxIntelFB-Start"/ {print $2; exit}') (kernel lines: boot-state.txt)"
+( { echo "== IONDRVFramebuffer start"; log show --last boot --style compact --predicate 'process == "kernel" AND eventMessage CONTAINS "IONDRVFramebuffer start"' 2>/dev/null | grep -o 'IONDRVFramebuffer start.*' | tail -1
+  echo "== kexts"; kmutil showloaded --list-only 2>/dev/null | grep -E 'watchthelight|org\.local|nullmoth|thebcd69|NVPrimarySelector'
   echo "== XeGfxIntelFramebuffer"; ioreg -l -w0 -r -c XeGfxIntelFramebuffer -d 2 2>/dev/null | grep -E 'XeGfxIntelFramebuffer|IOFBDependent|NVRMTiming|display0|IOFBCurrentPixelCount|backlight' | head -20
   # WhateverGreen renames GFX0 to IGPU once disable-gpu is gone: look for both
   echo "== iGPU"; for n in GFX0 IGPU; do ioreg -l -w0 -r -n "$n" -d 1 2>/dev/null | grep -E '\+-o|"device-id"|"class-code"|"model"|xgfbmove|VRAM|"IOName"' | head -12; done
   echo "== kernel (XeGfxIntelFB, XgFbMove)"; log show --last boot --style compact --predicate 'process == "kernel" AND (eventMessage CONTAINS "XeGfxIntelFB" OR eventMessage CONTAINS "XgFbMove")' 2>/dev/null | tail -60
-} > "$R/boot-state.txt" 2>&1
-cat "$R/boot-state.txt" >> "$S"
+} > "$R/boot-state.txt" 2>&1 ) < /dev/null &
 # the iGPU drives the panel but through Apple's IONDRVFramebuffer: XeGfxIntelFB did not start, nothing below can work
 if [ "$MODE" = eco ] || [ "$MODE" = standard ]; then
   [ "$(igpu_fb_present)" = 1 ] || finish "$MODE, but XeGfxIntelFB did not start (Apple's IONDRVFramebuffer/.Display_boot drives the panel): see the start line above"
