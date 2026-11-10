@@ -14,3 +14,4 @@ intel_display_device.c        # MIT; replaced by src/i915/intel_display_device.c
 intel_guc_submission.c        # MIT; replaced by src/i915/ with Linux 0323a5127e7c + c557fd1050f6 (GuC wakeref / g2h underflow, I-111)
 intel_engine_heartbeat.c      # MIT; replaced by src/i915/ with Linux 4c71fd099513 (heartbeat park double put, I-109)
 intel_gsc.c                   # MIT; replaced by src/i915/ with Linux 8cadce97bf26 (GSC top half with IRQs off)
+intel_drrs.c                  # MIT; replaced by src/i915/intel_drrs.c (no DRRS while the kext owns the picture: frontbuffer tracking sees no activity)

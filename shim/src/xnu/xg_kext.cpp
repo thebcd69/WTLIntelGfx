@@ -99,6 +99,7 @@ struct xg_kms_i2c {
 };
 int xg_kms_i2c(const char *name, struct xg_kms_i2c *x);
 extern void (*xg_kms_notify)(void);
+int xg_sysctl_reload_tunables(void);
 extern unsigned int xg_kms_hotplugs;
 }
 static bool xg_kms_ready(void);
@@ -575,6 +576,16 @@ xg_kms_decide(void)
 		xg_env_default("compat.linuxkpi.i915_enable_psr", "0");
 		xg_env_default("compat.linuxkpi.i915_enable_fbc", "0");
 		xg_env_default("compat.linuxkpi.i915_enable_dc", "0");
+		/*
+		 * The GU605's OLED takes its brightness over AUX (VESA level, DPCD 0x722; XeGfxIntelFB uses the same on
+		 * the adopt path). The VBT names the Intel HDR interface, which i915 refuses without HDR metadata in the
+		 * EDID and then falls back to the PCH PWM, which this panel ignores: after the takeover's full modeset
+		 * the panel sat at full brightness (2026-11-10). 2 = INTEL_DP_AUX_BACKLIGHT_FORCE_VESA.
+		 */
+		xg_env_default("compat.linuxkpi.i915_enable_dpcd_backlight", "2");
+		/* the tunables were fetched at stage 1, before any of the above: fetch them again (see xg_misc.c) */
+		int nt = xg_sysctl_reload_tunables();
+		IOLog("XeGfx: display path: %d tunables fetched again; env: %s\n", nt, xg_env);
 	}
 	IOLog("XeGfx: display path: %s%s%s\n", xg_kms_on == 1 ? "i915 KMS" : "adopt (i915 display off)",
 	    why ? " -- " : "", why ? why : "");

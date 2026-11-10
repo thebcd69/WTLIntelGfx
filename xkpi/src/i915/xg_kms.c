@@ -39,6 +39,7 @@
 #include "display/intel_display.h"
 #include "display/intel_display_types.h"
 #include "display/intel_dp.h"
+#include "display/intel_drrs.h"
 #include "display/intel_tc.h"
 
 #include "xg_kms.h"
@@ -247,6 +248,10 @@ xg_kms_dump(char *buf, unsigned long len)
 		xg_out(&b, " bootfb %ux%u pitch %u format 0x%08x modifier 0x%llx", fb->width, fb->height, fb->pitches[0],
 		    fb->format->format, (unsigned long long)fb->modifier);
 	xg_out(&b, "\n");
+	/* what i915 really runs with (the tunables reach it only through xg_sysctl_reload_tunables at stage 4) */
+	xg_out(&b, "params disable_display %d enable_psr %d enable_fbc %d enable_dc %d enable_dpcd_backlight %d\n",
+	    (int)i915->display.params.disable_display, i915->display.params.enable_psr, i915->display.params.enable_fbc,
+	    i915->display.params.enable_dc, i915->display.params.enable_dpcd_backlight);
 	drm_for_each_crtc(crtc, dev) {
 		u32 f0 = 0, f1 = 0;
 
@@ -256,9 +261,10 @@ xg_kms_dump(char *buf, unsigned long len)
 			msleep(250);
 			f1 = intel_de_read(i915, PIPE_FRMCOUNT_G4X(i915, to_intel_crtc(crtc)->pipe));
 		}
-		xg_out(&b, "crtc %s id %u enable %d active %d %ux%u measured %u Hz\n", crtc->name, crtc->base.id,
-		    crtc->state->enable, crtc->state->active, crtc->state->mode.hdisplay, crtc->state->mode.vdisplay,
-		    (f1 - f0) * 4);
+		xg_out(&b, "crtc %s id %u enable %d active %d %ux%u measured %u Hz psr %d drrs %d (active %d)\n", crtc->name,
+		    crtc->base.id, crtc->state->enable, crtc->state->active, crtc->state->mode.hdisplay,
+		    crtc->state->mode.vdisplay, (f1 - f0) * 4, to_intel_crtc_state(crtc->state)->has_psr,
+		    to_intel_crtc_state(crtc->state)->has_drrs, intel_drrs_is_active(to_intel_crtc(crtc)));
 	}
 	drm_connector_list_iter_begin(dev, &it);
 	drm_for_each_connector_iter(connector, &it)

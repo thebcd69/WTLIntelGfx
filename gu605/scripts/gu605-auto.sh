@@ -55,6 +55,13 @@ cat "$R/boot-state.txt" >> "$S"
 if [ "$MODE" = eco ] || [ "$MODE" = standard ]; then
   [ "$(igpu_fb_present)" = 1 ] || finish "$MODE, but XeGfxIntelFB did not start (Apple's IONDRVFramebuffer/.Display_boot drives the panel): see the start line above"
 fi
+# [gu605-mac] Ultimate is the way back when Eco does not come up: XeGfxIntelFB's boot guard (nvram xeintelfb-starts,
+# off after two starts that did not stay up 120 s) is cleared here, or the next Eco boot would find no framebuffer at
+# all and WindowServer would abort at start (2026-11-10 12:42, CGXMappedDisplayStart assert, a verbose screen for good)
+if [ "$MODE" = ultimate ]; then
+  gs=$(nvram xeintelfb-starts 2>/dev/null | cut -f2)
+  case "$gs" in ""|%00) ;; *) nvram xeintelfb-starts=%00 && say "XeGfxIntelFB boot guard was $gs: cleared (Ultimate boot)" ;; esac
+fi
 case "$MODE" in
   eco) LEVEL=$(conf ECO_LEVEL metal) ;;
   standard) LEVEL=$(conf STANDARD_LEVEL probe) ;;

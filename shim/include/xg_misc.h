@@ -11,6 +11,10 @@ extern "C" {
  * misc entry point that needs it calls it lazily too */
 void xg_misc_init(void);
 
+/* fetches every static tunable again from the environment as it is now (debug.xegfx_env, boot-args); stage 4 of the
+ * GU605 display path calls it after changing the environment. Returns how many tunables it looked at */
+int xg_sysctl_reload_tunables(void);
+
 /* MOD_QUIESCE then MOD_UNLOAD to every module registered through module_register_init, newest first; returns the
  * first refusal (the remaining modules stay loaded) */
 int xg_misc_module_unload_all(void);

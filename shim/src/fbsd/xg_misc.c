@@ -325,6 +325,37 @@ xg_sysctl_register_static(void)
 	SYSCTL_WUNLOCK();
 }
 
+/*
+ * The static tunables again, from the environment as it is now. They are fetched once, when stage 1 registers the
+ * static oids; the GU605 display path changes debug.xegfx_env at stage 4 (xg_kms_decide: i915_disable_display=0,
+ * i915_enable_psr=0, ...), and without this i915 never saw those values: on 2026-11-10 its display code ran with
+ * disable_display=1 (every connector "disconnected", no EDID) and with PSR, FBC and the DC states at their defaults,
+ * so the panel froze on its last frame a second after the takeover while macOS kept drawing into the framebuffer.
+ * A tunable with no value in the environment or the boot-args keeps what it has. Returns how many were looked at.
+ */
+int
+xg_sysctl_reload_tunables(void)
+{
+	const struct xg_set_entry *e;
+	int n = 0;
+
+	xg_misc_init();
+	SYSCTL_WLOCK();
+	for (e = xg_misc_set_start; e < xg_misc_set_end; e++) {
+		struct sysctl_oid *oidp;
+
+		if (strcmp(e->set, "sysctl_set") != 0)
+			continue;
+		oidp = __DECONST(struct sysctl_oid *, e->sym);
+		if ((oidp->oid_kind & CTLTYPE) == CTLTYPE_NODE || (oidp->oid_kind & CTLFLAG_TUN) == 0)
+			continue;
+		sysctl_load_tunable_by_oid_locked(oidp);
+		n++;
+	}
+	SYSCTL_WUNLOCK();
+	return (n);
+}
+
 int
 sysctl_ctx_init(struct sysctl_ctx_list *c)
 {
