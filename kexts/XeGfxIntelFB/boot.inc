@@ -148,6 +148,14 @@
             xbGet("xegfx_stage", &st);
         }
         if (st != 0) { bootSay("XeGfx is already at stage %d: left to the runner", st); return; }
+        // the kext's module start published XeGfxArm; its XeGfxResident (the stages' registry entry, stage 2 records
+        // the takeover preflight there) matches on that. OSKextLoadKextWithIdentifier does not send personalities,
+        // so this relies on the catalogue already holding them (a kext of the boot collection): say so if not
+        if (OSDictionary *m = IOService::serviceMatching("XeGfxResident")) {
+            IOService *r = IOService::waitForMatchingService(m, 5ull * 1000 * 1000 * 1000); m->release();
+            if (!r) { bootSay("stopped before stage 1: XeGfxResident did not start within 5 s (left to the runner)"); return; }
+            r->release();
+        }
         xbSet("xegfx_wdog", 60);
         if (!bootStage(1) || !bootStage(2)) return;
         // the takeover preflight of stage 2 (the kext refuses KMS without it too)
