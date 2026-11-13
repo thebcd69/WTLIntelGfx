@@ -24,13 +24,15 @@ pend_is_set() { [ "$(nvram gu605-pending 2>/dev/null | cut -f2)" = 1 ] || [ "$(c
 say() { echo "$(ts) $*" | tee -a "$S"; }
 # [gu605-mac] with i915 owning the display (DISPLAY=kms) the machine froze 1-3 min AFTER a finished run (2026-11-10
 # 12:35, 12:38: 'metal done', then a frozen panel at full brightness): the mark stays set for 5 minutes after the run
+# [gu605-mac] boot run (XeGfxIntelFB boot.inc): '1' = run at the next boot, written back here once this boot is known good
+bootrun_ok() { [ "$(conf BOOT_RUN 0)" = 1 ] && [ -n "${BN:-}" ] && nvram xeintelfb-boot=1 2>/dev/null; return 0; }
 kms_hold() {
-  grep -q 'display: i915 owns the display' "$R/stages/stages.log" 2>/dev/null || return 0
+  [ "${KMSHOLD:-0}" = 1 ] || grep -q 'display: i915 owns the display' "$R/stages/stages.log" 2>/dev/null || return 0
   pend 1; say "kms: the pending mark stays set for 5 minutes (a freeze in that time turns automatic runs off)"
   # [gu605-mac] an orderly restart or shutdown in those 5 minutes is not a freeze: launchd sends SIGTERM to the job
   # first, and the mark is cleared then. WAS: cleared only after the full 5 minutes, so a normal restart 4 minutes
   # after login turned automatic runs off for the next boot (2026-11-10 16:52).
-  trap 'pend 0; say "kms: shutdown or restart during the 5 minutes: pending mark cleared"; exit 0' TERM INT HUP
+  trap 'pend 0; bootrun_ok; say "kms: shutdown or restart during the 5 minutes: pending mark cleared"; exit 0' TERM INT HUP
   # in the foreground: launchd ends the job's whole process group when this script exits (no AbandonProcessGroup)
   sleep 300 & wait $!; trap - TERM INT HUP; pend 0; say "kms: 5 minutes up with i915 owning the display, pending mark cleared"
 }
@@ -84,6 +86,25 @@ if pend_is_set; then
   finish "the previous automatic run was never confirmed (hang, panic or power button): automatic runs are now OFF. Run gu605-collect.sh and send the report; re-enable with: sudo rm $G/autostart-off"
 fi
 case "$LEVEL" in probe) T=2 ;; gt) T=6 ;; metal|desktop) T=7 ;; *) finish "unknown level $LEVEL" ;; esac
+# [gu605-mac] boot run (XeGfxIntelFB boot.inc, 2026-11-13): with nvram xeintelfb-boot=1 the kext itself ran XgFbMove,
+# XeGfx's stages and the accelerator arming at its start, holding IOKit busy, so WindowServer's FIRST start is already
+# on the Intel GPU and nothing is restarted. XeGfxBootRun on the framebuffer says how far it got.
+BR=$(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | sed -nE 's/.*"XeGfxBootRun" = "([^"]*)".*/\1/p' | head -1)
+BN=$(nvram xeintelfb-boot 2>/dev/null | cut -f2); BOOTWS=0
+if [ -n "$BR$BN" ]; then
+  say "boot run (kernel): ${BR:-did not run}; nvram xeintelfb-boot=${BN:-unset}; busy released $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | sed -nE 's/.*"XeGfxBootRunReleasedMs" = ([0-9]+).*/\1/p' | head -1) ms after power-on; WindowServer started $(ps -o lstart= -p "$(pgrep -x WindowServer | head -1)" 2>/dev/null)"
+fi
+if [ -z "$BR" ] && [ "$BN" = 2 ]; then
+  nvram xeintelfb-boot=0 2>/dev/null; touch "$G/autostart-off"
+  finish "the kernel's boot run of an earlier boot was never confirmed (hang, panic or power button): the boot run and automatic runs are now OFF. Run gu605-collect.sh and send the report; re-enable with: sudo rm $G/autostart-off; sudo nvram xeintelfb-boot=1"
+fi
+if [ "$BR" = armed ] && [ "$LEVEL" = desktop ]; then
+  pend 1; KMSHOLD=1; f=0
+  for i in $(seq 1 45); do f=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); [ "${f:-0}" -gt 0 ] && break; sleep 1; done
+  if [ "${f:-0}" -gt 0 ]; then BOOTWS=1; say "WindowServer came up on the Intel GPU at boot ($f frames so far): nothing to restart"
+  else pend 0; say "boot run armed the accelerator, but WindowServer is not compositing on it (it started before the arming): the usual path from here"; fi
+fi
+if [ "$BOOTWS" = 0 ]; then
 # stages 1-2 are read-only; from 3 on a hang is possible, so the pending mark goes first
 bash "$G/gu605-stages.sh" 2 "$R/stages" || finish "stages 1-2 failed (see stages/)"
 { echo "== display as the firmware left it (stage 2)"; cat "$R/stages/display-decoded.txt" 2>/dev/null; } >> "$S"
@@ -120,12 +141,24 @@ if [ $dr = 10 ]; then
   echo "$(date +%T) WindowServer start #1 (pid $now, after logout)" >> "$R/desktop/guard.log"
   say "logout seen: WindowServer $old -> $now"
 elif [ $dr != 0 ]; then pend 0; finish "desktop step stopped before the restart (see desktop/)"; fi
+fi   # BOOTWS = 0
 say "WindowServer on the Intel GPU; confirming in 3 minutes"
-sleep 180
+# [gu605-mac] an orderly restart or shutdown while confirming is not a failed run (WAS: the mark stayed set and the next
+# boot turned automatic runs off)
+trap 'pend 0; bootrun_ok; say "shutdown or restart while confirming: pending mark cleared"; exit 0' TERM INT HUP
+if [ "$BOOTWS" = 1 ]; then
+  # no gu605-desktop.sh guard in this path: the same crash-loop rule here (more than 2 WindowServer starts -> disarm)
+  mkdir -p "$R/desktop"; w0=$(pgrep -x WindowServer | head -1); n=0
+  for i in $(seq 1 180); do sleep 1 & wait $!; w=$(pgrep -x WindowServer | head -1)
+    if [ -n "$w" ] && [ "$w" != "$w0" ]; then n=$((n + 1)); w0=$w; echo "$(date +%T) WindowServer start #$n (pid $w)" >> "$R/desktop/guard.log"; fi
+    if [ $n -gt 2 ]; then printf '# disarmed by the crash-loop guard %s\n-WindowServer\n' "$(date)" > "$AL"; say "CRASH LOOP: allow-list set to -WindowServer"; break; fi
+  done
+else sleep 180 & wait $!; fi
+trap - TERM INT HUP
 frames=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); frames=${frames:-0}
 starts=$(grep -c 'WindowServer start #' "$R/desktop/guard.log" 2>/dev/null); starts=${starts:-0}
 if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
-  pend 0
+  pend 0; bootrun_ok
   say "confirmed: $frames frames on the panel, $starts WindowServer restart(s)"
   # zero-copy flip (samwu07: 602 flips, 0 copies), only on a confirmed desktop, off again on any trouble in a minute
   if [ "$(conf FLIP 1)" = 1 ] && [ ! -e "$G/xeflip-off" ] && ! has_bootarg -xegfxnoflip && sysctl -n debug.nvaccel_xeflip_ggtt > /dev/null 2>&1; then
@@ -155,5 +188,5 @@ if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
   sysctl debug.nvaccel_iop_ok_h4 debug.nvaccel_iop_fail debug.nvaccel_pipe_perform 2>/dev/null >> "$S"
   finish "desktop on the Intel GPU"
 fi
-pend 0; touch "$G/autostart-off"
+pend 0; touch "$G/autostart-off"; [ -n "${BN:-}" ] && nvram xeintelfb-boot=0 2>/dev/null
 finish "desktop NOT confirmed ($frames frames, $starts WindowServer starts): automatic runs OFF; run gu605-collect.sh"

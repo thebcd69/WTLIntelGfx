@@ -14,7 +14,8 @@
     IOFBInterruptProc fConnProc = nullptr; OSObject *fConnTarget = nullptr; void *fConnRef = nullptr;
     volatile bool fConnEnabled = false; int fConnToken = 0; unsigned fConnFired = 0;
     thread_call_t fKmsCall = nullptr; IOLock *fKmsLock = nullptr;
-    bool fKmsUp = false, fExternal = false; unsigned fKmsHot = ~0u, fKmsUpTries = 0;
+    bool fKmsUp = false, fExternal = false, fOpened = false, fKmsPreOpen = false; unsigned fKmsHot = ~0u, fKmsUpTries = 0;
+    IOReturn enableController() override { IOReturn r = IONDRVFramebuffer::enableController(); fOpened = true; return r; }
     IODisplayModeID fBootId = 0, fCurId = 0; IOIndex fBootDepth = 0;
     uint32_t fBootW = 0, fBootH = 0, fBootHz16 = 0, fStartHz16 = 0, fIntMhz = 0;
     XifbKmsMode fKm[kKmsMax]; int fKmN = 0; bool fKmOffer[kKmsMax]; char fConnName[16] = {};
@@ -187,6 +188,9 @@
             }
         }
         if (r1 != kIOReturnSuccess || !id || !bw || !bh) {
+            // boot run (boot.inc): i915 can have the display before anything opened this framebuffer, and the boot
+            // NDRV answers only once IOFramebuffer::open has enabled the controller: wait for that without counting
+            if (!fOpened) { if (!fKmsPreOpen) { fKmsPreOpen = true; XIFBLOG("display path: i915 is up before the framebuffer was opened: the boot mode is read at the first open"); } return; }
             if (fKmsUpTries < 30) {
                 if (!(fKmsUpTries % 10)) XIFBLOG("display path: i915 is up, boot mode not readable yet (mode 0x%x: 0x%x, info 0x%x %ux%u): trying again", (unsigned)id, r1, r2, bw, bh);
                 fKmsUpTries++; return;   // fKmsUp stays false: kmsTick calls this again in a second

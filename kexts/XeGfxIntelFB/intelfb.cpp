@@ -20,6 +20,11 @@
 #include <IOKit/IOUserClient.h>         // gu605-ddc: clientHasPrivilege (XeGfxDdcEnable)
 #include <kern/task.h>
 #include <sys/errno.h>
+#include <sys/proc.h>
+#include <sys/queue.h>
+#include <libkern/OSKextLib.h>
+#include <libkern/OSAtomic.h>
+#include <stdarg.h>
 
 #define XIFBLOG(fmt, ...) IOLog("XeGfxIntelFB: " fmt "\n", ##__VA_ARGS__)
 
@@ -458,6 +463,8 @@ public:
         if (!ok && fBacklight) { fBacklight->detach(this); OSSafeReleaseNULL(fBacklight); }
         // display path: watch for i915 taking the display over (also if IOFramebuffer never asks for connect interrupts)
         { int nk = 0; if (ok && fGu605 && !PE_parse_boot_argn("-xeintelfbnokms", &nk, sizeof nk)) kmsWatchStart(); }
+        // [gu605-mac] the Intel desktop before WindowServer's first start (boot.inc; opt-in, nvram xeintelfb-boot=1)
+        if (ok && vram) bootRunStart();
         // the name is still the class name here; it becomes ".Display_boot" when the boot NDRV opens it
         XIFBLOG("IONDRVFramebuffer start %s, name %s", ok ? "ok" : "FAILED", getName());
         // a GPU's own framebuffer driver names its GPU and its slot; IONDRVFramebuffer does not, and XeGfxAGDC left
@@ -574,6 +581,7 @@ public:
     }
     bool hasDDCConnect(IOIndex ci) override { return fEdidLen ? true : IONDRVFramebuffer::hasDDCConnect(ci); }
 #include "kms.inc"
+#include "boot.inc"
 #include "ddc.inc"
 
     IOReturn getDDCBlock(IOIndex ci, UInt32 block, IOSelect type, IOOptionBits opt, UInt8 *data, IOByteCount *len) override {
