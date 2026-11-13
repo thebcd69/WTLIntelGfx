@@ -24,8 +24,15 @@ pend_is_set() { [ "$(nvram gu605-pending 2>/dev/null | cut -f2)" = 1 ] || [ "$(c
 say() { echo "$(ts) $*" | tee -a "$S"; }
 # [gu605-mac] with i915 owning the display (DISPLAY=kms) the machine froze 1-3 min AFTER a finished run (2026-11-10
 # 12:35, 12:38: 'metal done', then a frozen panel at full brightness): the mark stays set for 5 minutes after the run
-# [gu605-mac] boot run (XeGfxIntelFB boot.inc): '1' = run at the next boot, written back here once this boot is known good
-bootrun_ok() { [ "$(conf BOOT_RUN 0)" = 1 ] && [ -n "${BN:-}" ] && nvram xeintelfb-boot=1 2>/dev/null; return 0; }
+# [gu605-mac] the in-kernel boot run (XeGfxIntelFB boot.inc) is abandoned (2026-11-13: four Eco boots lost to it);
+# nothing here turns it on again. Its place is taken by early arming in gu605-desktop.sh (EARLY_ARM=1).
+bootrun_ok() { return 0; }
+# early arming: the mark early-arm-try is set before the attempt and taken away when the desktop is confirmed; a boot
+# that finds it (hang, panic, power button during the attempt) turns early arming off and goes the usual way
+early_off() { [ -e "$G/early-arm-try" ] || return 0
+  if [ -e "$G/early-arm-off" ]; then mv -f "$G/early-arm-try" "$G/early-arm-try.$(date +%Y%m%d-%H%M%S)"; else mv -f "$G/early-arm-try" "$G/early-arm-off"; fi
+  fullsync "$G"; }
+early_done() { [ -e "$G/early-arm-try" ] && mv -f "$G/early-arm-try" "$R/early-arm-try.$1"; fullsync "$G"; return 0; }
 kms_hold() {
   [ "${KMSHOLD:-0}" = 1 ] || grep -q 'display: i915 owns the display' "$R/stages/stages.log" 2>/dev/null || return 0
   pend 1; say "kms: the pending mark stays set for 5 minutes (a freeze in that time turns automatic runs off)"
@@ -81,29 +88,19 @@ if [ -x "$G/tools/xeddcprobe" ]; then say "ddc: $("$G/tools/xeddcprobe" enable "
 has_bootarg -xegfxoff && finish "boot-arg -xegfxoff: XeGfx idle"
 say "level: $LEVEL"
 [ "$LEVEL" = off ] && finish "level off"
+if [ -e "$G/early-arm-try" ]; then
+  say "early arming was tried by $(cut -d' ' -f3- "$G/early-arm-try" 2>/dev/null) and never confirmed: OFF for later boots ($G/early-arm-off; remove it to try again)"
+  early_off
+  if pend_is_set; then pend 0; say "the unconfirmed run was that attempt: automatic runs stay on, the usual path this boot"; fi
+fi
 if pend_is_set; then
   prev=$(cut -d' ' -f2- "$PF" 2>/dev/null); pend 0; touch "$G/autostart-off"; say "unconfirmed run: ${prev:-?}"
   finish "the previous automatic run was never confirmed (hang, panic or power button): automatic runs are now OFF. Run gu605-collect.sh and send the report; re-enable with: sudo rm $G/autostart-off"
 fi
 case "$LEVEL" in probe) T=2 ;; gt) T=6 ;; metal|desktop) T=7 ;; *) finish "unknown level $LEVEL" ;; esac
-# [gu605-mac] boot run (XeGfxIntelFB boot.inc, 2026-11-13): with nvram xeintelfb-boot=1 the kext itself ran XgFbMove,
-# XeGfx's stages and the accelerator arming at its start, holding IOKit busy, so WindowServer's FIRST start is already
-# on the Intel GPU and nothing is restarted. XeGfxBootRun on the framebuffer says how far it got.
-BR=$(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | sed -nE 's/.*"XeGfxBootRun" = "([^"]*)".*/\1/p' | head -1)
+# [gu605-mac] the in-kernel boot run is abandoned: make sure the kext's switch is off (it is inert unless '1')
 BN=$(nvram xeintelfb-boot 2>/dev/null | cut -f2); BOOTWS=0
-if [ -n "$BR$BN" ]; then
-  say "boot run (kernel): ${BR:-did not run}; nvram xeintelfb-boot=${BN:-unset}; busy released $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | sed -nE 's/.*"XeGfxBootRunReleasedMs" = ([0-9]+).*/\1/p' | head -1) ms after power-on; WindowServer started $(ps -o lstart= -p "$(pgrep -x WindowServer | head -1)" 2>/dev/null)"
-fi
-if [ -z "$BR" ] && [ "$BN" = 2 ]; then
-  nvram xeintelfb-boot=0 2>/dev/null; touch "$G/autostart-off"
-  finish "the kernel's boot run of an earlier boot was never confirmed (hang, panic or power button): the boot run and automatic runs are now OFF. Run gu605-collect.sh and send the report; re-enable with: sudo rm $G/autostart-off; sudo nvram xeintelfb-boot=1"
-fi
-if [ "$BR" = armed ] && [ "$LEVEL" = desktop ]; then
-  pend 1; KMSHOLD=1; f=0
-  for i in $(seq 1 45); do f=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); [ "${f:-0}" -gt 0 ] && break; sleep 1; done
-  if [ "${f:-0}" -gt 0 ]; then BOOTWS=1; say "WindowServer came up on the Intel GPU at boot ($f frames so far): nothing to restart"
-  else pend 0; say "boot run armed the accelerator, but WindowServer is not compositing on it (it started before the arming): the usual path from here"; fi
-fi
+case "$BN" in 1|2) nvram xeintelfb-boot=0 2>/dev/null; say "nvram xeintelfb-boot was $BN (in-kernel boot run, abandoned): set to 0" ;; esac
 if [ "$BOOTWS" = 0 ]; then
 # [gu605-mac] 2026-11-13 11:54: this runner was a second ahead of XeGfxIntelFB (start "begin" above); stage 4 took the
 # display while the kext was still reading EDID and DPCD over AUX A, its start then took 25 s instead of 0.5 s, the
@@ -129,8 +126,40 @@ pend 0
 # desktop: gu605-desktop.sh decides when WindowServer restarts (login window, automatic login left idle, or the next
 # logout: exit 10, armed and waiting)
 pend 1
-bash "$G/gu605-desktop.sh" "$R/desktop"; dr=$?
-if [ $dr = 10 ]; then
+# [gu605-mac] early arming (gu605.conf EARLY_ARM=1): gu605-desktop.sh arms before WindowServer's first display start
+# when it still can (exit 20); WindowServer then comes up on the Intel GPU by itself and nothing is restarted
+EARLY=0
+if [ "$(conf EARLY_ARM 0)" = 1 ] && [ ! -e "$G/early-arm-off" ]; then
+  EARLY=1; printf '%s %s\n' "$(ts)" "$R" > "$G/early-arm-try"; fullsync "$G/early-arm-try" "$G"
+fi
+EARLY=$EARLY bash "$G/gu605-desktop.sh" "$R/desktop"; dr=$?
+if [ $dr = 20 ]; then
+  ws0=$(pgrep -x WindowServer | head -1); wl=$ws0; wn=0; f=0; KMSHOLD=1; mkdir -p "$R/desktop"
+  say "armed before WindowServer's first display start; waiting for WindowServer $ws0 to open the framebuffer"
+  for i in $(seq 1 100); do
+    f=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); [ "${f:-0}" -gt 0 ] && break
+    w=$(pgrep -x WindowServer | head -1)
+    if [ -n "$w" ] && [ "$w" != "$wl" ]; then wn=$((wn + 1)); wl=$w; echo "$(date +%T) WindowServer start #$wn (pid $w, early wait)" >> "$R/desktop/guard.log"; fi
+    if [ $wn -gt 2 ]; then printf '# disarmed by the crash-loop guard %s\n-WindowServer\n' "$(date)" > "$AL"; say "CRASH LOOP while waiting: allow-list set to -WindowServer"; break; fi
+    sleep 1
+  done
+  if [ "${f:-0}" -gt 0 ] && [ $wn = 0 ]; then
+    BOOTWS=1; nvram xeintelfb-starts=%00 2>/dev/null
+    say "WindowServer came up on the Intel GPU at its first start ($f frames, ${i}s after the arming): nothing to restart"
+  elif [ $wn -gt 2 ]; then
+    early_off; pend 0
+    finish "early arming: WindowServer did not stay up; early arming is OFF for later boots, the desktop runs without the Intel GPU this boot"
+  else
+    early_off
+    say "armed early, but WindowServer is not compositing on the Intel GPU (${f:-0} frames, $wn restart(s)): early arming is OFF for later boots; the usual path now"
+    bash "$G/gu605-desktop.sh" "$R/desktop"; dr=$?
+  fi
+elif [ "$EARLY" = 1 ]; then
+  # not armed early: an attempt that failed turns it off, one that was not possible this boot (too late) does not
+  if [ -e "$R/desktop/early-failed" ]; then early_off; say "early arming failed ($(cat "$R/desktop/early-failed")): OFF for later boots"; else early_done not-used; fi
+fi
+if [ "$BOOTWS" = 1 ]; then :
+elif [ $dr = 10 ]; then
   # a shutdown while waiting is not a failed run: the pending mark is set again only when WindowServer restarts
   pend 0
   wmin=$(conf DESKTOP_WAIT_MIN 120); old=$(pgrep -x WindowServer | head -1)
@@ -153,7 +182,7 @@ fi   # BOOTWS = 0
 say "WindowServer on the Intel GPU; confirming in 3 minutes"
 # [gu605-mac] an orderly restart or shutdown while confirming is not a failed run (WAS: the mark stayed set and the next
 # boot turned automatic runs off)
-trap 'pend 0; bootrun_ok; say "shutdown or restart while confirming: pending mark cleared"; exit 0' TERM INT HUP
+trap 'pend 0; early_done shutdown; say "shutdown or restart while confirming: pending mark cleared"; exit 0' TERM INT HUP
 if [ "$BOOTWS" = 1 ]; then
   # no gu605-desktop.sh guard in this path: the same crash-loop rule here (more than 2 WindowServer starts -> disarm)
   mkdir -p "$R/desktop"; w0=$(pgrep -x WindowServer | head -1); n=0
@@ -166,7 +195,7 @@ trap - TERM INT HUP
 frames=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); frames=${frames:-0}
 starts=$(grep -c 'WindowServer start #' "$R/desktop/guard.log" 2>/dev/null); starts=${starts:-0}
 if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
-  pend 0; bootrun_ok
+  pend 0; early_done confirmed
   say "confirmed: $frames frames on the panel, $starts WindowServer restart(s)"
   # zero-copy flip (samwu07: 602 flips, 0 copies), only on a confirmed desktop, off again on any trouble in a minute
   if [ "$(conf FLIP 1)" = 1 ] && [ ! -e "$G/xeflip-off" ] && ! has_bootarg -xegfxnoflip && sysctl -n debug.nvaccel_xeflip_ggtt > /dev/null 2>&1; then
@@ -196,5 +225,9 @@ if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
   sysctl debug.nvaccel_iop_ok_h4 debug.nvaccel_iop_fail debug.nvaccel_pipe_perform 2>/dev/null >> "$S"
   finish "desktop on the Intel GPU"
 fi
-pend 0; touch "$G/autostart-off"; [ -n "${BN:-}" ] && nvram xeintelfb-boot=0 2>/dev/null
+if [ "$BOOTWS" = 1 ]; then
+  pend 0; early_off
+  finish "early-armed desktop NOT confirmed ($frames frames, $starts WindowServer starts): early arming is OFF for later boots; automatic runs stay on"
+fi
+pend 0; touch "$G/autostart-off"
 finish "desktop NOT confirmed ($frames frames, $starts WindowServer starts): automatic runs OFF; run gu605-collect.sh"

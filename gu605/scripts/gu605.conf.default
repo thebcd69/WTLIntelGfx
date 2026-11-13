@@ -31,3 +31,10 @@ DESKTOP_LOGGED_IN=logout
 DESKTOP_AUTOLOGIN_S=150
 DESKTOP_IDLE_S=60
 DESKTOP_WAIT_MIN=120
+# early arming (gu605-desktop.sh "early"): 1 = when the stages reach 7 while the boot's first WindowServer is still
+# waiting for the GPU (it waits 60 s, GPUWranglerWaitForPublish), arm the accelerator right then: WindowServer comes up
+# on the Intel GPU at its first start and nothing is restarted. An attempt that fails, or is never confirmed, writes
+# early-arm-off next to this file and later boots go the usual way (remove that file to try again).
+EARLY_ARM=0
+# early arming only while WindowServer is younger than this (its wait for the GPU ends about 74 s after its start)
+EARLY_ARM_MAX_WS_S=55

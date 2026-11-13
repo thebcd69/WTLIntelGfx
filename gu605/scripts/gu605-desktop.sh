@@ -5,6 +5,8 @@
 #   4 scan-out pipe (nvaccelfb=3)  4a WindowServer completion marks  4b frame transactions (nvaccel_iop=1)
 #   5 crash-loop guard, then WindowServer restarts (only at the login window unless FORCE=1)
 # Stops BEFORE the restart at the first failed check: nothing visible changes then.
+# [gu605-mac] EARLY=1 (gu605-auto.sh, gu605.conf EARLY_ARM=1): steps 2-4b BEFORE WindowServer's first display start,
+# so there is nothing to restart (exit 20). See "early" below for when that is possible.
 set -uo pipefail
 . "$(dirname "$0")/gu605-common.sh"
 [ "$(id -u)" = 0 ] || { echo "run as root (sudo)" >&2; exit 2; }
@@ -34,6 +36,63 @@ say "allow-list: $(grep -v '^#' "$AL" | tr '\n' ' ')"
 say "1. stages to 7"
 bash "$G/gu605-stages.sh" 7 "$R/stages" || die "the stages did not reach 7"
 [ "$(sysctl -n debug.nmxaccel_headless 2>/dev/null)" = 0 ] || say "note: debug.nmxaccel_headless is $(sysctl -n debug.nmxaccel_headless 2>/dev/null) (0 = the Intel GPU owns the panel)"
+has_d0() { [ "$(ioreg -r -c XeGfxIntelFramebuffer -d 2 2>/dev/null | grep -c display0)" -gt 0 ]; }
+etime_s() { awk -F'[-:]' '{ n = NF; s = $n + 60 * $(n-1); if (n >= 3) s += 3600 * $(n-2); if (n >= 4) s += 86400 * $(n-3); print s }' <<< "$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"; }
+# [gu605-mac] early (2026-11-13). What the first WindowServer of a boot does in Eco, from today's 13:58:52 boot:
+#   13:59:18 it starts; 13:59:32 "Setting offline display ... CGXConstructVirtualFramebuffer" and it waits for the GPU;
+#   14:00:32 "GPUWranglerWaitForPublish: timed out" (60 s), only THEN "Creating FB 1 of 1": it opens XeGfxIntelFB's
+#   framebuffer (display0 appears) and loads XeMTLDriver, which said "'WindowServer' is armed-only and debug.nvaccelfb
+#   reads 0 -- no device"; the accelerator's pipe got "scanout gate CLOSED".
+# The stages had been at 7 since 13:59:46. The only thing that kept the arming until after that open was the wait for
+# display0 just below, which cannot come before the open. With one framebuffer (XeGfxIntelFB's, on the iGPU itself) the
+# accelerator's head 4 can be no other, so in that case the arming is done at once: WindowServer's first look at the
+# GPU then finds it armed and the gate open, and nothing has to be restarted. AGDC comes last here: if its
+# registration is what WindowServer waits for, everything else is in place when the wait ends.
+# Anything unexpected -> the usual path below (the same writes again are harmless), and early-failed tells the runner.
+EARLY=${EARLY:-0}
+if [ "$EARLY" = 1 ]; then
+  ws=$(pgrep -x WindowServer | head -1); wse=$([ -n "$ws" ] && etime_s "$ws" || echo 9999)
+  nfb=$(ioreg -r -c IOFramebuffer -d 1 2>/dev/null | grep -c '^+-o ')
+  for i in $(seq 1 20); do hp=$(sysctl -n debug.nvaccel_heads_published 2>/dev/null); [ $(( ${hp:-0} & 16 )) != 0 ] && break; sleep 0.5; done
+  cu=$(stat -f %Su /dev/console 2>/dev/null)
+  if has_d0; then say "early: WindowServer has already opened the framebuffer (display0 is there): the usual path"; EARLY=0
+  elif [ "$nfb" != 1 ]; then say "early: $nfb framebuffers, not 1: the usual path"; EARLY=0
+  elif [ $(( ${hp:-0} & 16 )) = 0 ]; then say "early: the accelerator has no head 4 yet (published 0x$(printf %x "${hp:-0}")): the usual path"; EARLY=0
+  elif [ "$wse" -gt "$(conf EARLY_ARM_MAX_WS_S 55)" ]; then say "early: WindowServer $ws is ${wse}s old (its wait for the GPU ends about 74 s after its start): too late, the usual path"; EARLY=0
+  else case "$cu" in ""|root|_*) ;; *) say "early: $cu is logged in: the usual path"; EARLY=0 ;; esac; fi
+fi
+if [ "$EARLY" = 1 ]; then
+  say "early: arming before WindowServer's first display start (WindowServer $ws is ${wse}s old, no display0, heads published 0x$(printf %x "$hp"))"
+  why=""
+  if [ "$(conf K5 1)" = 1 ]; then sysctl -w debug.xegfx_agdc_k5=1 > /dev/null || why="debug.xegfx_agdc_k5=1 failed"; fi
+  [ -n "$why" ] || sysctl -w debug.nvaccelfb=1 > /dev/null || why="debug.nvaccelfb=1 failed"
+  [ -n "$why" ] || { sleep 1; sysctl -w debug.nvaccelfb=3 > /dev/null || why="debug.nvaccelfb=3 failed"; }
+  [ -n "$why" ] || { sleep 1; [ "$(sysctl -n debug.nvaccelfb)" = 1 ] || why="not armed (debug.nvaccelfb = $(sysctl -n debug.nvaccelfb), heads registered 0x$(printf %x "$(sysctl -n debug.nvaccel_heads_registered 2>/dev/null)"))"; }
+  if [ -z "$why" ]; then
+    if [ "$(conf WSMARK 1)" = 1 ]; then sysctl -w debug.nvaccel_surface_gpu_on=1 > /dev/null 2>&1 || say "no WindowServer marks in this XeGfxAccel"
+    else sysctl -w debug.nvaccel_surface_gpu_on=0 > /dev/null 2>&1; fi
+    sysctl -w debug.nvaccel_iop=1 > /dev/null && [ "$(sysctl -n debug.nvaccel_iop)" = 1 ] || why="debug.nvaccel_iop=1 did not stay"
+  fi
+  # WindowServer opened the framebuffer while this ran: what it found is not known
+  late=0; [ -n "$why" ] || { has_d0 && { why="WindowServer opened the framebuffer during the arming"; late=1; }; }
+  if [ -z "$why" ]; then
+    sysctl -w debug.xegfx_agdc=1 > /dev/null || why="debug.xegfx_agdc=1 failed"
+    [ -n "$why" ] || { for i in $(seq 1 10); do [ "$(sysctl -n debug.xegfx_agdc)" = 1 ] && break; sleep 0.5; done
+                       [ "$(sysctl -n debug.xegfx_agdc)" = 1 ] || why="AGDC did not come up ($(sysctl -n debug.xegfx_agdc))"; }
+  fi
+  if [ -z "$why" ]; then
+    { sysctl debug.nvaccelfb debug.nvaccel_iop debug.xegfx_agdc debug.xegfx_agdc_k5 debug.nmxaccel_headless debug.xegfx_stage debug.nvaccel_heads_published debug.nvaccel_heads_registered 2>&1
+      ioreg -l -w0 -r -c NMXAccel; ioreg -l -w0 -r -c XeGfxIntelFramebuffer; } > "$R/state-early.txt" 2>&1
+    klog_bg 3m "$R/kernel-early.txt"
+    echo early > "$R/restart-mode"
+    say "armed early; nothing restarted: WindowServer $ws finds the Intel GPU when its wait ends"
+    sync; exit 20
+  fi
+  say "early: $why: the usual path from here"
+  # a timing miss is not a failure of the method: only a real failure turns early arming off for later boots
+  if [ $late = 1 ]; then echo "$why" > "$R/early-late"; else echo "$why" > "$R/early-failed"; fi
+  klog_bg 3m "$R/kernel-early-failed.txt"
+fi
 # the panel reaches XeGfxIntelFB's framebuffer (display0) once WindowServer has opened it
 for i in $(seq 1 60); do [ "$(ioreg -r -c XeGfxIntelFramebuffer -d 2 | grep -c display0)" -gt 0 ] && break; sleep 2; done
 [ "$(ioreg -r -c XeGfxIntelFramebuffer -d 2 | grep -c display0)" -gt 0 ] || die "the panel is not on XeGfxIntelFB's framebuffer (nvram xeintelfb-starts = $(nvram xeintelfb-starts 2>/dev/null | cut -f2))"
@@ -72,7 +131,6 @@ klog_bg 10m "$R/kernel-10m.txt"; sync
 #   DESKTOP_LOGGED_IN=logout                   -> at the next logout (armed now, nothing restarted; exit 10)
 #   DESKTOP_LOGGED_IN=skip                     -> stop (the old behaviour)
 idle_s() { ioreg -r -c IOHIDSystem -d 1 2>/dev/null | awk '/"HIDIdleTime"/ {print int($NF / 1000000000); exit}'; }
-etime_s() { awk -F'[-:]' '{ n = NF; s = $n + 60 * $(n-1); if (n >= 3) s += 3600 * $(n-2); if (n >= 4) s += 86400 * $(n-3); print s }' <<< "$(ps -o etime= -p "$1" 2>/dev/null | tr -d ' ')"; }
 notify() { local u=$1 msg=$2 uid; uid=$(id -u "$u" 2>/dev/null) || return 0
   launchctl asuser "$uid" sudo -u "$u" osascript -e "display notification \"$msg\" with title \"GU605\"" > /dev/null 2>&1 || true; }
 MODE=now
