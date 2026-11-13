@@ -154,7 +154,8 @@ hold_release "desktop step returned $dr"
 if [ $dr = 20 ]; then
   ws0=$(pgrep -x WindowServer | head -1); wl=$ws0; wn=0; f=0; KMSHOLD=1; mkdir -p "$R/desktop"
   say "armed before WindowServer's first display start; waiting for WindowServer $ws0 to open the framebuffer"
-  for i in $(seq 1 100); do
+  # 150 s: after a warm restart from Ultimate WindowServer waits another 60 s for the powered-off NVIDIA device
+  for i in $(seq 1 150); do
     f=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); [ "${f:-0}" -gt 0 ] && break
     w=$(pgrep -x WindowServer | head -1)
     if [ -n "$w" ] && [ "$w" != "$wl" ]; then wn=$((wn + 1)); wl=$w; echo "$(date +%T) WindowServer start #$wn (pid $w, early wait)" >> "$R/desktop/guard.log"; fi
@@ -197,18 +198,43 @@ elif [ $dr = 10 ]; then
   say "logout seen: WindowServer $old -> $now"
 elif [ $dr != 0 ]; then pend 0; finish "desktop step stopped before the restart (see desktop/)"; fi
 fi   # BOOTWS = 0
-say "WindowServer on the Intel GPU; confirming in 3 minutes"
+CS=$(conf CONFIRM_S 180); FG=$(conf FLIP_GUARD_S 60)
+case "$CS" in ''|*[!0-9]*) CS=180 ;; esac; case "$FG" in ''|*[!0-9]*) FG=60 ;; esac
+[ "$CS" -ge 30 ] || CS=30; [ "$FG" -ge 10 ] || FG=10
+say "WindowServer on the Intel GPU; confirming in $CS s"
+# [gu605-mac] 2026-11-13 15:43: the Dock started 2 s after WindowServer's first frame, logged "SLSTransaction decode timed
+# out" and never drew itself (the owner: "Dock yok"; killall Dock brought it). Seen the same day after a WindowServer
+# restart too. A Dock that logged that at its start is ended once (launchd starts a new one), at most twice.
+dock_fix() {
+  local u="" p="" t n
+  for t in $(seq 1 300); do
+    u=$(stat -f %Su /dev/console 2>/dev/null)
+    case "$u" in ""|root|loginwindow|_*) ;; *) p=$(pgrep -u "$u" -x Dock | head -1); [ -n "$p" ] && break ;; esac
+    sleep 2
+  done
+  [ -n "$p" ] || return 0
+  for n in 1 2; do
+    sleep 12
+    p=$(pgrep -u "$u" -x Dock | head -1); [ -n "$p" ] || return 0
+    if [ "$(log show --last 3m --style compact --predicate 'process == "Dock" AND eventMessage CONTAINS "SLSTransaction decode timed out"' 2>/dev/null | grep -c "Dock\\[$p:")" -gt 0 ]; then
+      say "Dock $p did not reach WindowServer at its start (SLSTransaction decode timed out): ending it, launchd starts a new one"
+      kill "$p" 2>/dev/null
+    else return 0; fi
+  done
+}
+( dock_fix ) < /dev/null &
 # [gu605-mac] an orderly restart or shutdown while confirming is not a failed run (WAS: the mark stayed set and the next
 # boot turned automatic runs off)
-trap 'pend 0; early_done shutdown; say "shutdown or restart while confirming: pending mark cleared"; exit 0' TERM INT HUP
+# (a boot that came up early-armed and is compositing counts as good for the hold of the next one)
+trap 'pend 0; early_done shutdown; [ "$BOOTWS" = 1 ] && [ "$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null || echo 0)" -gt 0 ] && hold_rearm; say "shutdown or restart while confirming: pending mark cleared"; exit 0' TERM INT HUP
 if [ "$BOOTWS" = 1 ]; then
   # no gu605-desktop.sh guard in this path: the same crash-loop rule here (more than 2 WindowServer starts -> disarm)
   mkdir -p "$R/desktop"; w0=$(pgrep -x WindowServer | head -1); n=0
-  for i in $(seq 1 180); do sleep 1 & wait $!; w=$(pgrep -x WindowServer | head -1)
+  for i in $(seq 1 "$CS"); do sleep 1 & wait $!; w=$(pgrep -x WindowServer | head -1)
     if [ -n "$w" ] && [ "$w" != "$w0" ]; then n=$((n + 1)); w0=$w; echo "$(date +%T) WindowServer start #$n (pid $w)" >> "$R/desktop/guard.log"; fi
     if [ $n -gt 2 ]; then printf '# disarmed by the crash-loop guard %s\n-WindowServer\n' "$(date)" > "$AL"; say "CRASH LOOP: allow-list set to -WindowServer"; break; fi
   done
-else sleep 180 & wait $!; fi
+else sleep "$CS" & wait $!; fi
 trap - TERM INT HUP
 frames=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); frames=${frames:-0}
 starts=$(grep -c 'WindowServer start #' "$R/desktop/guard.log" 2>/dev/null); starts=${starts:-0}
@@ -219,7 +245,7 @@ if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
   if [ "$(conf FLIP 1)" = 1 ] && [ ! -e "$G/xeflip-off" ] && ! has_bootarg -xegfxnoflip && sysctl -n debug.nvaccel_xeflip_ggtt > /dev/null 2>&1; then
     ws=$(pgrep -x WindowServer | head -1); f0=$(sysctl -n debug.nvaccel_iop_fail 2>/dev/null)
     sysctl -w debug.nvaccel_xeflip=1 > /dev/null 2>&1; say "flip: $(sysctl -n debug.nvaccel_xeflip_ggtt 2>/dev/null | head -1)"
-    sleep 60
+    sleep "$FG"
     ws2=$(pgrep -x WindowServer | head -1); f1=$(sysctl -n debug.nvaccel_iop_fail 2>/dev/null)
     if [ "$ws2" != "$ws" ] || [ "${f1:-0}" != "${f0:-0}" ]; then
       sysctl -w debug.nvaccel_xeflip=0 > /dev/null 2>&1; touch "$G/xeflip-off"; say "flip OFF for later boots (WindowServer $ws -> $ws2, failures $f0 -> $f1)"
@@ -230,7 +256,7 @@ if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
       if [ "$(conf FLIP_ASYNC 0)" = 1 ] && [ ! -e "$G/xeflip-async-off" ] && sysctl -n debug.nvaccel_xeflip_async > /dev/null 2>&1; then
         a0=$(sysctl -n debug.nvaccel_xeflip_async_flips 2>/dev/null); f0=$(sysctl -n debug.nvaccel_iop_fail 2>/dev/null)
         sysctl -w debug.nvaccel_xeflip_async=1 > /dev/null 2>&1; say "flip: asynchronous ON"
-        sleep 60
+        sleep "$FG"
         ws3=$(pgrep -x WindowServer | head -1); f1=$(sysctl -n debug.nvaccel_iop_fail 2>/dev/null); a1=$(sysctl -n debug.nvaccel_xeflip_async_flips 2>/dev/null)
         on=$(sysctl -n debug.nvaccel_xeflip_async 2>/dev/null)
         if [ "$ws3" != "$ws" ] || [ "${f1:-0}" != "${f0:-0}" ] || [ "${on:-0}" != 1 ]; then

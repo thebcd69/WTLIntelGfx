@@ -42,3 +42,7 @@ EARLY_ARM_MAX_WS_S=55
 # next Eco boot's XeGfxIntelFB keeps IOKit busy after its start (70 s at most) until the runner has armed the
 # accelerator: the first WindowServer comes up on the Intel GPU. Needs EARLY_ARM=1. First time: sudo nvram xeintelfb-hold=1
 HOLD=0
+# how long a desktop on the Intel GPU is watched before it counts as confirmed (pending mark cleared, the hold switched
+# on for the next boot, zero-copy flip switched on), and how long each of the two flip switches is watched after that
+CONFIRM_S=180
+FLIP_GUARD_S=60
