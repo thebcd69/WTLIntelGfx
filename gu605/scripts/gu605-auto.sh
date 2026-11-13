@@ -61,6 +61,11 @@ has_bootarg -xegfxnoauto && finish "boot-arg -xegfxnoauto"
 # WindowServer is up before the panel's framebuffer gets its display (and before anything below may restart it)
 for i in $(seq 1 90); do pgrep -x WindowServer > /dev/null && break; sleep 2; done
 sleep 5
+# [gu605-mac] 2026-11-13 18:31 (the boot after a panic): this point was reached 34 s after power-on, XeGfxIntelFB began
+# its start 2 s later; the mode read "unknown" and nothing was done all boot (no Metal, no restart). Wait until one of
+# the two framebuffer drivers is there before deciding.
+for i in $(seq 1 30); do [ "$(igpu_fb_present)" = 1 ] || [ "$(nvidia_live)" = 1 ] && break; sleep 2; done
+[ "$i" -gt 1 ] && say "waited $(( (i - 1) * 2 )) s for a framebuffer driver (XeGfxIntelFramebuffer $(igpu_fb_present), NVRM live $(nvidia_live))"
 MODE=$(gpu_mode)
 say "mode: $MODE (XeGfxIntelFramebuffer $(igpu_fb_present), iGPU drives the panel $(igpu_drives_panel), NVRM live $(nvidia_live), NVIDIA PCI node $(pci_display_present 10de))"
 # [gu605-mac] the kernel log is read in the background: each `log show --last boot` took 20-45 s on this machine and the
