@@ -37,8 +37,17 @@
     }
     // debug.<leaf>: read into old/oldlen and/or write newp/newlen; ENOENT while the kext that owns it is not up yet
     static int xbSysctl(const char *leaf, void *oldp, size_t *oldlen, const void *newp, size_t newlen) {
-        struct sysctl_oid *o = nullptr, *it;
+        // [gu605-mac] 2026-11-13 WAS: only sysctl__debug_children itself was searched. A kext's OIDs are not on that
+        // list: sysctl_register_oid() links them into a second, writable list that hangs off the first entry of the
+        // parent (the "mutable anchor": oid_number INT_MIN, oid_arg1 = the list; xnu kern_newsysctl.c). So no
+        // debug.xegfx_* was ever found and the first boot run stopped with "XeGfx did not come up (load 0x0)" although
+        // the kext had loaded (11:20:47; the runner found it at stage 0 seconds later).
+        struct sysctl_oid *o = nullptr, *it, *first = SLIST_FIRST(&sysctl__debug_children);
         SLIST_FOREACH(it, &sysctl__debug_children, oid_link) if (it->oid_name && !strcmp(it->oid_name, leaf)) { o = it; break; }
+        if (!o && first && first->oid_number == (int)0x80000000 && first->oid_arg1) {
+            struct sysctl_oid_list *rw = (struct sysctl_oid_list *)first->oid_arg1;
+            SLIST_FOREACH(it, rw, oid_link) if (it->oid_name && !strcmp(it->oid_name, leaf)) { o = it; break; }
+        }
         if (!o || !o->oid_handler) return ENOENT;
         struct sysctl_req req; bzero(&req, sizeof req);
         req.p = current_proc(); req.lock = 1;
@@ -131,7 +140,11 @@
             OSReturn r1 = OSKextLoadKextWithIdentifier("org.local.XgFbMove"); IOSleep(300);
             OSReturn r2 = OSKextLoadKextWithIdentifier("org.watchthelight.XeGfx");
             XIFBLOG("boot run: XgFbMove load 0x%x, XeGfx load 0x%x", r1, r2);
-            if (!xbWait("xegfx_stage", -1, 8000)) { bootSay("FAILED: XeGfx did not come up (load 0x%x)", r2); return; }
+            if (!xbWait("xegfx_stage", -1, 8000)) {
+                struct sysctl_oid *f = SLIST_FIRST(&sysctl__debug_children);
+                bootSay("FAILED: XeGfx did not come up (load 0x%x; debug list head number 0x%x arg1 %s)", r2, f ? (unsigned)f->oid_number : 0u, f && f->oid_arg1 ? "set" : "null");
+                return;
+            }
             xbGet("xegfx_stage", &st);
         }
         if (st != 0) { bootSay("XeGfx is already at stage %d: left to the runner", st); return; }
