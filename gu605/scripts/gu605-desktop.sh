@@ -48,6 +48,10 @@ etime_s() { awk -F'[-:]' '{ n = NF; s = $n + 60 * $(n-1); if (n >= 3) s += 3600 
 # accelerator's head 4 can be no other, so in that case the arming is done at once: WindowServer's first look at the
 # GPU then finds it armed and the gate open, and nothing has to be restarted. AGDC comes last here: if its
 # registration is what WindowServer waits for, everything else is in place when the wait ends.
+# 15:01 boot the same day, a cold Eco boot: no such 60 s wait (it came from the powered-off NVIDIA device still being in
+# the registry); WindowServer opened the framebuffer 2.5 s after XeGfxIntelFB's start, long before stage 7. So the kext
+# can now hold IOKit busy after its start (boot.inc, nvram xeintelfb-hold=1, debug.xeintelfb_hold reads 1): the runner
+# gets here with no display0 yet, arms, and ends the hold. WindowServer's age does not matter then.
 # Anything unexpected -> the usual path below (the same writes again are harmless), and early-failed tells the runner.
 EARLY=${EARLY:-0}
 if [ "$EARLY" = 1 ]; then
@@ -58,7 +62,7 @@ if [ "$EARLY" = 1 ]; then
   if has_d0; then say "early: WindowServer has already opened the framebuffer (display0 is there): the usual path"; EARLY=0
   elif [ "$nfb" != 1 ]; then say "early: $nfb framebuffers, not 1: the usual path"; EARLY=0
   elif [ $(( ${hp:-0} & 16 )) = 0 ]; then say "early: the accelerator has no head 4 yet (published 0x$(printf %x "${hp:-0}")): the usual path"; EARLY=0
-  elif [ "$wse" -gt "$(conf EARLY_ARM_MAX_WS_S 55)" ]; then say "early: WindowServer $ws is ${wse}s old (its wait for the GPU ends about 74 s after its start): too late, the usual path"; EARLY=0
+  elif [ "$(sysctl -n debug.xeintelfb_hold 2>/dev/null)" != 1 ] && [ "$wse" -gt "$(conf EARLY_ARM_MAX_WS_S 55)" ]; then say "early: WindowServer $ws is ${wse}s old (its wait for the GPU ends about 74 s after its start): too late, the usual path"; EARLY=0
   else case "$cu" in ""|root|_*) ;; *) say "early: $cu is logged in: the usual path"; EARLY=0 ;; esac; fi
 fi
 if [ "$EARLY" = 1 ]; then

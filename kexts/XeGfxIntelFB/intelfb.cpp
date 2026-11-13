@@ -254,6 +254,22 @@ static bool xifbAddConsoleRange(IOService *pci)
 #define XIFB_P1_BUF    0x7027c
 #define XIFB_P1_SURF   0x7019c
 
+// [gu605-mac] the hold (boot.inc): debug.xeintelfb_hold reads 1 while this kext keeps IOKit busy for the runner; writing
+// 0 ends the hold. Registered only on a boot that holds.
+class XeGfxIntelFramebuffer;
+static XeGfxIntelFramebuffer *gXifbHold; static bool gXifbHoldSysctl;
+static int xifbHoldRead(); static void xifbHoldEnd();
+static int xifb_hold_sysctl SYSCTL_HANDLER_ARGS
+{
+    int v = xifbHoldRead();
+    int e = sysctl_handle_int(oidp, &v, 0, req);
+    if (e || !req->newptr) return e;
+    if (v == 0) xifbHoldEnd();
+    return 0;
+}
+SYSCTL_PROC(_debug, OID_AUTO, xeintelfb_hold, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, xifb_hold_sysctl, "I",
+            "1 while XeGfxIntelFB holds IOKit busy for the runner (boot.inc); write 0 to end the hold");
+
 class XeGfxIntelFramebuffer : public IONDRVFramebuffer {
     OSDeclareDefaultStructors(XeGfxIntelFramebuffer)
     uint8_t fEdid[256]; int fEdidLen = 0; uint32_t fHz16 = 0;
@@ -463,8 +479,8 @@ public:
         if (!ok && fBacklight) { fBacklight->detach(this); OSSafeReleaseNULL(fBacklight); }
         // display path: watch for i915 taking the display over (also if IOFramebuffer never asks for connect interrupts)
         { int nk = 0; if (ok && fGu605 && !PE_parse_boot_argn("-xeintelfbnokms", &nk, sizeof nk)) kmsWatchStart(); }
-        // [gu605-mac] the Intel desktop before WindowServer's first start (boot.inc; opt-in, nvram xeintelfb-boot=1)
-        if (ok && vram) bootRunStart();
+        // [gu605-mac] the Intel desktop at WindowServer's first start: the hold (boot.inc; opt-in, nvram xeintelfb-hold=1)
+        if (ok && vram) holdStart();
         // the name is still the class name here; it becomes ".Display_boot" when the boot NDRV opens it
         XIFBLOG("IONDRVFramebuffer start %s, name %s", ok ? "ok" : "FAILED", getName());
         // a GPU's own framebuffer driver names its GPU and its slot; IONDRVFramebuffer does not, and XeGfxAGDC left
@@ -618,3 +634,5 @@ public:
 };
 
 OSDefineMetaClassAndStructors(XeGfxIntelFramebuffer, IONDRVFramebuffer)
+static int xifbHoldRead() { XeGfxIntelFramebuffer *f = gXifbHold; return (f && f->fHoldBusy) ? 1 : 0; }
+static void xifbHoldEnd() { if (XeGfxIntelFramebuffer *f = gXifbHold) f->holdRelease("runner"); }

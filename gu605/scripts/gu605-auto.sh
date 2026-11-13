@@ -32,6 +32,13 @@ bootrun_ok() { return 0; }
 early_off() { [ -e "$G/early-arm-try" ] || return 0
   if [ -e "$G/early-arm-off" ]; then mv -f "$G/early-arm-try" "$G/early-arm-try.$(date +%Y%m%d-%H%M%S)"; else mv -f "$G/early-arm-try" "$G/early-arm-off"; fi
   fullsync "$G"; }
+# the hold (XeGfxIntelFB boot.inc, nvram xeintelfb-hold=1): the kext keeps IOKit busy after its start so the boot's first
+# WindowServer waits; debug.xeintelfb_hold reads 1 meanwhile. It is ended here as soon as the arming is done, and on every
+# other way out of this script (the kext ends it by itself after 70 s)
+hold_now() { [ "$(sysctl -n debug.xeintelfb_hold 2>/dev/null)" = 1 ]; }
+hold_release() { if hold_now; then sysctl -w debug.xeintelfb_hold=0 > /dev/null 2>&1; say "hold: ended ($1), $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | sed -nE 's/.*"XeGfxHoldReleasedMs" = ([0-9]+).*/\1/p' | head -1) ms after power-on"; fi; return 0; }
+# '1' again only after a boot whose desktop was confirmed, with HOLD=1 in gu605.conf and early arming still allowed
+hold_rearm() { if [ "$(conf HOLD 0)" = 1 ] && [ "$(conf EARLY_ARM 0)" = 1 ] && [ ! -e "$G/early-arm-off" ]; then nvram xeintelfb-hold=1 2>/dev/null && say "hold: on for the next Eco boot (nvram xeintelfb-hold=1)"; fi; return 0; }
 early_done() { [ -e "$G/early-arm-try" ] && mv -f "$G/early-arm-try" "$R/early-arm-try.$1"; fullsync "$G"; return 0; }
 kms_hold() {
   [ "${KMSHOLD:-0}" = 1 ] || grep -q 'display: i915 owns the display' "$R/stages/stages.log" 2>/dev/null || return 0
@@ -43,7 +50,7 @@ kms_hold() {
   # in the foreground: launchd ends the job's whole process group when this script exits (no AbandonProcessGroup)
   sleep 300 & wait $!; trap - TERM INT HUP; pend 0; say "kms: 5 minutes up with i915 owning the display, pending mark cleared"
 }
-finish() { kms_hold; say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; exit 0; }
+finish() { hold_release "run ending"; kms_hold; say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; exit 0; }
 # run folders are never deleted here (a few MB each); gu605-collect.sh reports their size
 
 say "GU605 auto, $(sw_vers -productVersion) ($(sw_vers -buildVersion)), boot $(sysctl -n kern.boottime | sed -E 's/.*\} //')"
@@ -119,7 +126,11 @@ if ! bash "$G/gu605-stages.sh" "$T" "$R/stages"; then pend 0; finish "stages to 
 say "stages to $T passed"
 if [ "$LEVEL" = gt ]; then pend 0; finish "gt done"; fi
 if [ ! -f "$XU/libvulkan_intel.dylib" ]; then pend 0; finish "no Mesa ANV installed ($XU): Metal not tried"; fi
-bash "$G/gu605-metal-check.sh" "$R/metal"; mc=$?
+# [gu605-mac] while the kext holds the boot for us the Metal check (7-11 s) is left out when it has passed before with
+# this very plugin and this Mesa (gpupass-ok is newer than both)
+if hold_now && [ "$LEVEL" = desktop ] && [ -f "$G/gpupass-ok" ] && [ "$G/gpupass-ok" -nt "$XB/Contents/MacOS/XeMTLDriver" ] && [ "$G/gpupass-ok" -nt "$XU/libvulkan_intel.dylib" ]; then
+  say "hold: Metal check left out (passed with this plugin and Mesa: $(head -1 "$G/gpupass-ok"))"; mc=0
+else bash "$G/gu605-metal-check.sh" "$R/metal"; mc=$?; fi
 pend 0
 [ $mc = 0 ] || finish "Metal check failed (see metal/)"
 [ "$LEVEL" = metal ] && finish "metal done"
@@ -132,7 +143,9 @@ EARLY=0
 if [ "$(conf EARLY_ARM 0)" = 1 ] && [ ! -e "$G/early-arm-off" ]; then
   EARLY=1; printf '%s %s\n' "$(ts)" "$R" > "$G/early-arm-try"; fullsync "$G/early-arm-try" "$G"
 fi
+hold_now && say "hold: XeGfxIntelFB is holding IOKit busy ($(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | sed -nE 's/.*"XeGfxHold" = "([^"]*)".*/\1/p' | head -1)); WindowServer $(pgrep -x WindowServer | head -1)"
 EARLY=$EARLY bash "$G/gu605-desktop.sh" "$R/desktop"; dr=$?
+hold_release "desktop step returned $dr"
 if [ $dr = 20 ]; then
   ws0=$(pgrep -x WindowServer | head -1); wl=$ws0; wn=0; f=0; KMSHOLD=1; mkdir -p "$R/desktop"
   say "armed before WindowServer's first display start; waiting for WindowServer $ws0 to open the framebuffer"
@@ -195,7 +208,7 @@ trap - TERM INT HUP
 frames=$(sysctl -n debug.nvaccel_iop_ok_h4 2>/dev/null); frames=${frames:-0}
 starts=$(grep -c 'WindowServer start #' "$R/desktop/guard.log" 2>/dev/null); starts=${starts:-0}
 if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
-  pend 0; early_done confirmed
+  pend 0; early_done confirmed; hold_rearm
   say "confirmed: $frames frames on the panel, $starts WindowServer restart(s)"
   # zero-copy flip (samwu07: 602 flips, 0 copies), only on a confirmed desktop, off again on any trouble in a minute
   if [ "$(conf FLIP 1)" = 1 ] && [ ! -e "$G/xeflip-off" ] && ! has_bootarg -xegfxnoflip && sysctl -n debug.nvaccel_xeflip_ggtt > /dev/null 2>&1; then

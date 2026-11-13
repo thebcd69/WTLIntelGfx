@@ -38,3 +38,7 @@ DESKTOP_WAIT_MIN=120
 EARLY_ARM=0
 # early arming only while WindowServer is younger than this (its wait for the GPU ends about 74 s after its start)
 EARLY_ARM_MAX_WS_S=55
+# the hold (XeGfxIntelFB boot.inc): 1 = after every confirmed Eco desktop, nvram xeintelfb-hold=1 is written, and the
+# next Eco boot's XeGfxIntelFB keeps IOKit busy after its start (70 s at most) until the runner has armed the
+# accelerator: the first WindowServer comes up on the Intel GPU. Needs EARLY_ARM=1. First time: sudo nvram xeintelfb-hold=1
+HOLD=0
