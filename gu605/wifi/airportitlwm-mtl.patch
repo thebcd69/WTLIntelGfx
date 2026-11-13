@@ -155,7 +155,7 @@ index b52204d..fbf6392 100644
  
  typedef UInt8  u8;
 diff --git a/itlwm/hal_iwx/ItlIwx.cpp b/itlwm/hal_iwx/ItlIwx.cpp
-index f80e5cb..35c2ef5 100644
+index f80e5cb..2a28eb7 100644
 --- a/itlwm/hal_iwx/ItlIwx.cpp
 +++ b/itlwm/hal_iwx/ItlIwx.cpp
 @@ -142,6 +142,9 @@ int iwx_debug = 1;
@@ -668,7 +668,7 @@ index f80e5cb..35c2ef5 100644
      memset(&rm_sta_cmd, 0, sizeof(rm_sta_cmd));
      if (ic->ic_opmode == IEEE80211_M_MONITOR)
          rm_sta_cmd.sta_id = IWX_MONITOR_STA_ID;
-@@ -7643,6 +7899,27 @@ iwx_rm_sta_cmd(struct iwx_softc *sc, struct iwx_node *in)
+@@ -7643,6 +7899,32 @@ iwx_rm_sta_cmd(struct iwx_softc *sc, struct iwx_node *in)
      return err;
  }
  
@@ -686,7 +686,12 @@ index f80e5cb..35c2ef5 100644
 +                busy++;
 +        if (!busy)
 +            break;
-+        tsleep_nsec(&sc->txq, 0, "iwxtxe", MSEC_TO_NSEC(10));
++        if (getMainWorkLoop()->inGate()) {   /* let the TX-done interrupts in: sleep on the gate, not with it */
++            AbsoluteTime deadline;
++            clock_interval_to_deadline(10, kMillisecondScale, reinterpret_cast<uint64_t *>(&deadline));
++            getMainCommandGate()->commandSleep(&sc->txq, deadline, THREAD_UNINT);
++        } else
++            tsleep_nsec(&sc->txq, 0, "iwxtxe", MSEC_TO_NSEC(10));
 +    }
 +    XYLog("MTL: TX rings %s after %d ms (%d busy)\n", busy ? "NOT empty" : "empty", waited, busy);
 +    for (q = 1; q < 4 && q < nitems(sc->txq); q++)
@@ -696,7 +701,7 @@ index f80e5cb..35c2ef5 100644
  int ItlIwx::
  iwx_rm_sta(struct iwx_softc *sc, struct iwx_node *in)
  {
-@@ -7656,11 +7933,41 @@ iwx_rm_sta(struct iwx_softc *sc, struct iwx_node *in)
+@@ -7656,11 +7938,41 @@ iwx_rm_sta(struct iwx_softc *sc, struct iwx_node *in)
              __FUNCTION__, err);
          return err;
      }
@@ -739,7 +744,7 @@ index f80e5cb..35c2ef5 100644
      }
  
      sc->sc_rx_ba_sessions = 0;
-@@ -7674,130 +7981,838 @@ iwx_rm_sta(struct iwx_softc *sc, struct iwx_node *in)
+@@ -7674,129 +7986,837 @@ iwx_rm_sta(struct iwx_softc *sc, struct iwx_node *in)
              continue;
          ieee80211_delba_request(ic, ni, 0, 1, i);
      }
@@ -1011,7 +1016,6 @@ index f80e5cb..35c2ef5 100644
 -            return ENOBUFS;
 -    } else if (remain < 2 + rs->rs_nrates)
 -        return ENOBUFS;
--    preq->band_data[0].offset = htole16(frm - (uint8_t *)wh);
 +    err = iwx_send_cmd_pdu(sc,
 +                           IWX_WIDE_ID(IWX_MAC_CONF_GROUP, IWX_MAC_CONFIG_CMD),
 +                           0, sizeof(cmd), &cmd);
@@ -1674,11 +1678,10 @@ index f80e5cb..35c2ef5 100644
 +            return ENOBUFS;
 +    } else if (remain < 2 + rs->rs_nrates)
 +        return ENOBUFS;
-+    preq->band_data[0].offset = htole16(frm - (uint8_t *)wh);
+     preq->band_data[0].offset = htole16(frm - (uint8_t *)wh);
      pos = frm;
      frm = ieee80211_add_rates(frm, rs);
-     if (rs->rs_nrates > IEEE80211_RATE_SIZE)
-@@ -7878,11 +8893,23 @@ iwx_config_umac_scan(struct iwx_softc *sc)
+@@ -7878,11 +8898,23 @@ iwx_config_umac_scan(struct iwx_softc *sc)
      scan_config->tx_chains = htole32(iwx_fw_valid_tx_ant(sc));
      scan_config->rx_chains = htole32(iwx_fw_valid_rx_ant(sc));
      
@@ -1702,7 +1705,7 @@ index f80e5cb..35c2ef5 100644
      
      hcmd.data[0] = scan_config;
      hcmd.len[0] = cmd_size;
-@@ -7984,6 +9011,8 @@ iwx_umac_scan_size(struct iwx_softc *sc)
+@@ -7984,6 +9016,8 @@ iwx_umac_scan_size(struct iwx_softc *sc)
          return sizeof(iwx_scan_req_umac_v12);
      else if (scan_ver == 14)
          return sizeof(iwx_scan_req_umac_v14);
@@ -1711,7 +1714,7 @@ index f80e5cb..35c2ef5 100644
      
      if (isset(sc->sc_ucode_api, IWX_UCODE_TLV_API_ADAPTIVE_DWELL_V2))
          base_size = IWX_SCAN_REQ_UMAC_SIZE_V8;
-@@ -8097,6 +9126,12 @@ iwx_umac_scan(struct iwx_softc *sc, int bgscan)
+@@ -8097,6 +9131,12 @@ iwx_umac_scan(struct iwx_softc *sc, int bgscan)
  #endif
      uint8_t scan_ver = iwx_lookup_cmd_ver(sc, IWX_LONG_GROUP, IWX_SCAN_REQ_UMAC);
      
@@ -1724,17 +1727,12 @@ index f80e5cb..35c2ef5 100644
      if (scan_ver == 12)
          return iwx_umac_scan_v12(sc, bgscan);
      else if (scan_ver == 14)
-@@ -8491,31 +9526,195 @@ iwx_umac_scan_v14(struct iwx_softc *sc, int bgscan)
-     general_params->active_dwell[IWX_SCAN_HB_LMAC_IDX] = IWL_SCAN_DWELL_ACTIVE;
-     general_params->passive_dwell[IWX_SCAN_HB_LMAC_IDX] = IWL_SCAN_DWELL_PASSIVE;
+@@ -8495,27 +9535,191 @@ iwx_umac_scan_v14(struct iwx_softc *sc, int bgscan)
+     req->scan_params.periodic_params.schedule[0].interval = 0;
+     req->scan_params.periodic_params.schedule[0].iter_count = 1;
      
--    /* Specify the scan plan: We'll do one iteration. */
--    req->scan_params.periodic_params.schedule[0].interval = 0;
--    req->scan_params.periodic_params.schedule[0].iter_count = 1;
-+    /* Specify the scan plan: We'll do one iteration. */
-+    req->scan_params.periodic_params.schedule[0].interval = 0;
-+    req->scan_params.periodic_params.schedule[0].iter_count = 1;
-+    
+-    err = iwx_fill_probe_req(sc, &req->scan_params.probe_params.preq);
+-    if (err)
 +    err = iwx_fill_probe_req(sc, &req->scan_params.probe_params.preq);
 +    if (err)
 +        return err;
@@ -1887,9 +1885,7 @@ index f80e5cb..35c2ef5 100644
 +    
 +    scan_p->periodic_params.schedule[0].interval = htole16(0);
 +    scan_p->periodic_params.schedule[0].iter_count = 1;
-     
--    err = iwx_fill_probe_req(sc, &req->scan_params.probe_params.preq);
--    if (err)
++    
 +    err = iwx_fill_probe_req(sc, &scan_p->probe_params.preq);
 +    if (err) {
 +        ::free(cmd);
@@ -1935,7 +1931,7 @@ index f80e5cb..35c2ef5 100644
      return err;
  }
  
-@@ -8818,6 +10017,9 @@ iwx_mac_ctxt_cmd(struct iwx_softc *sc, struct iwx_node *in, uint32_t action,
+@@ -8818,6 +10022,9 @@ iwx_mac_ctxt_cmd(struct iwx_softc *sc, struct iwx_node *in, uint32_t action,
          return 0;
      }
      
@@ -1945,7 +1941,7 @@ index f80e5cb..35c2ef5 100644
      memset(&cmd, 0, sizeof(cmd));
      
      iwx_mac_ctxt_cmd_common(sc, in, &cmd, action);
-@@ -8853,6 +10055,47 @@ iwx_mac_ctxt_cmd(struct iwx_softc *sc, struct iwx_node *in, uint32_t action,
+@@ -8853,6 +10060,53 @@ iwx_mac_ctxt_cmd(struct iwx_softc *sc, struct iwx_node *in, uint32_t action,
  int ItlIwx::
  iwx_clear_statistics(struct iwx_softc *sc)
  {
@@ -1974,12 +1970,18 @@ index f80e5cb..35c2ef5 100644
 +        serr = iwx_send_cmd(sc, &shcmd);
 +        if (serr == 0) {
 +            /* Wait for SYSTEM_STATISTICS_END_NOTIF firmware notification. */
-+            while (!sc->sc_system_stats_cleared) {
-+                serr = tsleep_nsec(&sc->sc_system_stats_cleared, 0, "iwxstat",
-+                                   SEC_TO_NSEC(1));
-+                if (serr)
-+                    break;
-+            }
++            /* (AirportItlwm tree) the state tasks run inside the command gate and the RX interrupt needs that
++             * gate: a tsleep here keeps it and the notification can never arrive ("clear -> 35", GU605
++             * 2026-11-13, auth torn down every time). Sleep on the gate like the other waits of this tree. */
++            if (getMainWorkLoop()->inGate())
++                serr = iwx_wait_notification(sc, &sc->sc_system_stats_cleared, 1, 1000);
++            else
++                while (!sc->sc_system_stats_cleared) {
++                    serr = tsleep_nsec(&sc->sc_system_stats_cleared, 0, "iwxstat",
++                                       SEC_TO_NSEC(1));
++                    if (serr)
++                        break;
++                }
 +        }
 +        XYLog("MTL: SYSTEM_STATISTICS v1 clear -> %d (end notif %d)\n",
 +              serr, sc->sc_system_stats_cleared);
@@ -1993,7 +1995,7 @@ index f80e5cb..35c2ef5 100644
      struct iwx_statistics_cmd scmd = {
          .flags = htole32(IWX_STATISTICS_FLG_CLEAR)
      };
-@@ -9058,7 +10301,13 @@ iwx_enable_mgmt_queue(struct iwx_softc *sc)
+@@ -9058,7 +10312,13 @@ iwx_enable_mgmt_queue(struct iwx_softc *sc)
      int cmdver;
  
      cmdver = iwx_lookup_cmd_ver(sc, IWX_LONG_GROUP, IWX_ADD_STA);
@@ -2008,7 +2010,7 @@ index f80e5cb..35c2ef5 100644
          sc->first_data_qid = IWX_QID_MGMT - 1;
      else
          sc->first_data_qid = IWX_QID_MGMT;
-@@ -9354,6 +10603,9 @@ iwx_config_he_sta(struct iwx_softc *sc, struct ieee80211_node *ni)
+@@ -9354,6 +10614,9 @@ iwx_config_he_sta(struct iwx_softc *sc, struct ieee80211_node *ni)
  {
      if (!(ni->ni_flags & IEEE80211_NODE_HE))
          return 0;
@@ -2018,7 +2020,7 @@ index f80e5cb..35c2ef5 100644
      if ((ni->ni_flags & (IEEE80211_NODE_HECAP | IEEE80211_NODE_HEOP)) !=
          (IEEE80211_NODE_HECAP | IEEE80211_NODE_HEOP))
          return EINVAL;
-@@ -9638,6 +10890,12 @@ iwx_phy_ctxt_update(struct iwx_softc *sc, struct iwx_phy_ctxt *phyctxt,
+@@ -9638,6 +10901,12 @@ iwx_phy_ctxt_update(struct iwx_softc *sc, struct iwx_phy_ctxt *phyctxt,
      uint16_t band_flags = (IEEE80211_CHAN_2GHZ | IEEE80211_CHAN_5GHZ);
      int err;
      
@@ -2031,7 +2033,7 @@ index f80e5cb..35c2ef5 100644
      if (isset(sc->sc_enabled_capa,
                IWX_UCODE_TLV_CAPA_BINDING_CDB_SUPPORT) &&
          (phyctxt->channel->ic_flags & band_flags) !=
-@@ -9668,6 +10926,219 @@ iwx_phy_ctxt_update(struct iwx_softc *sc, struct iwx_phy_ctxt *phyctxt,
+@@ -9668,6 +10937,219 @@ iwx_phy_ctxt_update(struct iwx_softc *sc, struct iwx_phy_ctxt *phyctxt,
          }
      }
      
@@ -2251,7 +2253,7 @@ index f80e5cb..35c2ef5 100644
      return 0;
  }
  
-@@ -9682,6 +11153,9 @@ iwx_auth(struct iwx_softc *sc)
+@@ -9682,6 +11164,9 @@ iwx_auth(struct iwx_softc *sc)
      
      splassert(IPL_NET);
      
@@ -2261,7 +2263,7 @@ index f80e5cb..35c2ef5 100644
      in->in_ni.ni_chw = IEEE80211_CHAN_WIDTH_20_NOHT;
      in->in_ni.ni_flags &= ~(IEEE80211_NODE_HT |
                              IEEE80211_NODE_QOS |
-@@ -9796,6 +11270,9 @@ iwx_deauth(struct iwx_softc *sc)
+@@ -9796,6 +11281,9 @@ iwx_deauth(struct iwx_softc *sc)
      
      splassert(IPL_NET);
      
@@ -2271,7 +2273,7 @@ index f80e5cb..35c2ef5 100644
      if (!isset(sc->sc_enabled_capa, IWX_UCODE_TLV_CAPA_SESSION_PROT_CMD))
          iwx_unprotect_session(sc, in);
      else {
-@@ -9887,6 +11364,22 @@ iwx_run(struct iwx_softc *sc)
+@@ -9887,6 +11375,22 @@ iwx_run(struct iwx_softc *sc)
          }
      }
      
@@ -2294,7 +2296,7 @@ index f80e5cb..35c2ef5 100644
      /* We have now been assigned an associd by the AP. */
      err = iwx_mac_ctxt_cmd(sc, in, IWX_FW_CTXT_ACTION_MODIFY, 1);
      if (err) {
-@@ -9950,17 +11443,22 @@ iwx_run(struct iwx_softc *sc)
+@@ -9950,17 +11454,22 @@ iwx_run(struct iwx_softc *sc)
      in->in_ni.ni_txrate = 0;
      in->in_ni.ni_txmcs = 0;
  
@@ -2317,7 +2319,7 @@ index f80e5cb..35c2ef5 100644
      if (err) {
          XYLog("%s: could not update rate scaling (error %d)\n",
                DEVNAME(sc), err);
-@@ -10062,6 +11560,13 @@ iwx_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
+@@ -10062,6 +11571,13 @@ iwx_set_key(struct ieee80211com *ic, struct ieee80211_node *ni,
          return (ieee80211_set_key(ic, ni, k));
      }
      
@@ -2331,7 +2333,7 @@ index f80e5cb..35c2ef5 100644
      memset(&cmd, 0, sizeof(cmd));
      
      cmd.common.key_flags = htole16(IWX_STA_KEY_FLG_CCM |
-@@ -10097,6 +11602,17 @@ iwx_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
+@@ -10097,6 +11613,17 @@ iwx_delete_key(struct ieee80211com *ic, struct ieee80211_node *ni,
          return;
      }
      
@@ -2349,7 +2351,7 @@ index f80e5cb..35c2ef5 100644
      memset(&cmd, 0, sizeof(cmd));
      
      cmd.common.key_flags = htole16(IWX_STA_KEY_NOT_VALID |
-@@ -10508,6 +12024,15 @@ iwx_send_update_mcc_cmd(struct iwx_softc *sc, const char *alpha2)
+@@ -10508,6 +12035,15 @@ iwx_send_update_mcc_cmd(struct iwx_softc *sc, const char *alpha2)
      struct iwx_mcc_update_resp *resp;
      size_t resp_len;
      int err;
@@ -2365,7 +2367,7 @@ index f80e5cb..35c2ef5 100644
      
      memset(&mcc_cmd, 0, sizeof(mcc_cmd));
      mcc_cmd.mcc = htole16(alpha2[0] << 8 | alpha2[1]);
-@@ -10531,6 +12056,32 @@ iwx_send_update_mcc_cmd(struct iwx_softc *sc, const char *alpha2)
+@@ -10531,6 +12067,32 @@ iwx_send_update_mcc_cmd(struct iwx_softc *sc, const char *alpha2)
      }
      
      resp_len = iwx_rx_packet_payload_len(pkt);
@@ -2398,7 +2400,7 @@ index f80e5cb..35c2ef5 100644
      if (resp_len < sizeof(*resp)) {
          err = EIO;
          goto out;
-@@ -10607,6 +12158,8 @@ iwx_init_hw(struct iwx_softc *sc)
+@@ -10607,6 +12169,8 @@ iwx_init_hw(struct iwx_softc *sc)
          return EBUSY;
      
      err = iwx_send_tx_ant_cfg(sc, iwx_fw_valid_tx_ant(sc));
@@ -2407,7 +2409,7 @@ index f80e5cb..35c2ef5 100644
      if (err) {
          XYLog("%s: could not init tx ant config (error %d)\n",
                 DEVNAME(sc), err);
-@@ -10625,6 +12178,8 @@ iwx_init_hw(struct iwx_softc *sc)
+@@ -10625,6 +12189,8 @@ iwx_init_hw(struct iwx_softc *sc)
      }
      
      err = iwx_send_bt_init_conf(sc);
@@ -2416,7 +2418,7 @@ index f80e5cb..35c2ef5 100644
      if (err) {
          XYLog("%s: could not init bt coex (error %d)\n",
                 DEVNAME(sc), err);
-@@ -10632,15 +12187,33 @@ iwx_init_hw(struct iwx_softc *sc)
+@@ -10632,15 +12198,33 @@ iwx_init_hw(struct iwx_softc *sc)
      }
      
      err = iwx_send_soc_conf(sc);
@@ -2450,7 +2452,7 @@ index f80e5cb..35c2ef5 100644
      /* Add auxiliary station for scanning */
      err = iwx_add_aux_sta(sc);
      if (err) {
-@@ -10665,6 +12238,7 @@ iwx_init_hw(struct iwx_softc *sc)
+@@ -10665,6 +12249,7 @@ iwx_init_hw(struct iwx_softc *sc)
              goto err;
          }
      }
@@ -2458,7 +2460,7 @@ index f80e5cb..35c2ef5 100644
      
      if (!isset(sc->sc_enabled_capa, IWX_UCODE_TLV_CAPA_SET_LTR_GEN2)) {
          err = iwx_config_ltr(sc);
-@@ -10677,11 +12251,15 @@ iwx_init_hw(struct iwx_softc *sc)
+@@ -10677,11 +12262,15 @@ iwx_init_hw(struct iwx_softc *sc)
      
      if (isset(sc->sc_enabled_capa, IWX_UCODE_TLV_CAPA_CT_KILL_BY_FW)) {
          err = iwx_send_temp_report_ths_cmd(sc);
@@ -2474,7 +2476,7 @@ index f80e5cb..35c2ef5 100644
      if (err) {
          XYLog("%s: could not send power command (error %d)\n",
                 DEVNAME(sc), err);
-@@ -10690,14 +12268,19 @@ iwx_init_hw(struct iwx_softc *sc)
+@@ -10690,14 +12279,19 @@ iwx_init_hw(struct iwx_softc *sc)
      
      if (sc->sc_nvm.lar_enabled) {
          err = iwx_send_update_mcc_cmd(sc, "ZZ");
@@ -2495,7 +2497,7 @@ index f80e5cb..35c2ef5 100644
      if (err) {
          XYLog("%s: could not configure scan (error %d)\n",
                 DEVNAME(sc), err);
-@@ -10705,6 +12288,8 @@ iwx_init_hw(struct iwx_softc *sc)
+@@ -10705,6 +12299,8 @@ iwx_init_hw(struct iwx_softc *sc)
      }
      
      err = iwx_disable_beacon_filter(sc);
@@ -2504,7 +2506,7 @@ index f80e5cb..35c2ef5 100644
      if (err) {
          XYLog("%s: could not disable beacon filter (error %d)\n",
                 DEVNAME(sc), err);
-@@ -10997,6 +12582,7 @@ iwx_stop(struct _ifnet *ifp)
+@@ -10997,6 +12593,7 @@ iwx_stop(struct _ifnet *ifp)
      sc->sc_flags &= ~IWX_FLAG_TE_ACTIVE;
      sc->sc_flags &= ~IWX_FLAG_HW_ERR;
      sc->sc_flags &= ~IWX_FLAG_TXFLUSH;
@@ -2512,7 +2514,7 @@ index f80e5cb..35c2ef5 100644
  
      sc->sc_rx_ba_sessions = 0;
      sc->ba_rx.start_tidmask = 0;
-@@ -11201,7 +12787,8 @@ iwx_nic_umac_error(struct iwx_softc *sc)
+@@ -11201,7 +12798,8 @@ iwx_nic_umac_error(struct iwx_softc *sc)
      
      base = sc->sc_uc.uc_umac_error_event_table;
      
@@ -2522,7 +2524,7 @@ index f80e5cb..35c2ef5 100644
          XYLog("%s: Invalid error log pointer 0x%08x\n",
                DEVNAME(sc), base);
          return;
-@@ -11294,7 +12881,8 @@ iwx_nic_error(struct iwx_softc *sc)
+@@ -11294,7 +12892,8 @@ iwx_nic_error(struct iwx_softc *sc)
      
      XYLog("%s: dumping device error log\n", DEVNAME(sc));
      base = sc->sc_uc.uc_lmac_error_event_table[0];
@@ -2532,7 +2534,7 @@ index f80e5cb..35c2ef5 100644
          XYLog("%s: Invalid error log pointer 0x%08x\n",
                DEVNAME(sc), base);
          return;
-@@ -11552,7 +13140,40 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
+@@ -11552,7 +13151,40 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
                  struct iwx_alive_resp_v5 *resp5;
                  
                  DPRINTF(("%s: firmware alive, size=%d\n", __FUNCTION__, iwx_rx_packet_payload_len(pkt)));
@@ -2574,7 +2576,7 @@ index f80e5cb..35c2ef5 100644
                      SYNC_RESP_STRUCT(resp4, pkt, struct iwx_alive_resp_v4 *);
                      sc->sc_uc.uc_lmac_error_event_table[0] = le32toh(
                                                                       resp4->lmac_data[0].dbg_ptrs.error_event_table_ptr);
-@@ -11628,6 +13249,22 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
+@@ -11628,6 +13260,22 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
                  break;
              }
                  
@@ -2597,7 +2599,7 @@ index f80e5cb..35c2ef5 100644
              case IWX_WIDE_ID(IWX_REGULATORY_AND_NVM_GROUP,
                  IWX_NVM_GET_INFO):
              case IWX_ADD_STA_KEY:
-@@ -11698,6 +13335,10 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
+@@ -11698,6 +13346,10 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
              case IWX_SCAN_COMPLETE_UMAC: {
                  struct iwx_umac_scan_complete *notif;
                  SYNC_RESP_STRUCT(notif, pkt, struct iwx_umac_scan_complete *);
@@ -2608,7 +2610,7 @@ index f80e5cb..35c2ef5 100644
                  iwx_endscan(sc);
                  break;
              }
-@@ -11705,10 +13346,54 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
+@@ -11705,10 +13357,55 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
              case IWX_SCAN_ITERATION_COMPLETE_UMAC: {
                  struct iwx_umac_scan_iter_complete_notif *notif;
                  SYNC_RESP_STRUCT(notif, pkt, struct iwx_umac_scan_iter_complete_notif *);
@@ -2649,6 +2651,7 @@ index f80e5cb..35c2ef5 100644
 +                SYNC_RESP_STRUCT(snotif, pkt, struct iwx_system_statistics_end_notif *);
 +                sc->sc_system_stats_cleared = 1;
 +                wakeupOn(&sc->sc_system_stats_cleared);
++                getMainCommandGate()->commandWakeup(&sc->sc_system_stats_cleared);
 +                break;
 +            }
 +                
@@ -2663,7 +2666,7 @@ index f80e5cb..35c2ef5 100644
              case IWX_MCC_CHUB_UPDATE_CMD: {
                  struct iwx_mcc_chub_notif *notif;
                  SYNC_RESP_STRUCT(notif, pkt, struct iwx_mcc_chub_notif *);
-@@ -11843,6 +13528,11 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
+@@ -11843,6 +13540,11 @@ iwx_rx_pkt(struct iwx_softc *sc, struct iwx_rx_data *data, struct mbuf_list *ml)
                  break;
              }
                  
@@ -2675,7 +2678,7 @@ index f80e5cb..35c2ef5 100644
              default:
                  handled = 0;
                  XYLog("%s: unhandled firmware response 0x%x/0x%x "
-@@ -12328,6 +14018,14 @@ const struct iwl_cfg iwl_cfg_ma_a0_gf_a0 = {
+@@ -12328,6 +14030,14 @@ const struct iwl_cfg iwl_cfg_ma_a0_gf_a0 = {
      .num_rbds = IWL_NUM_RBDS_AX210_HE,
  };
  
@@ -2690,7 +2693,7 @@ index f80e5cb..35c2ef5 100644
  const struct iwl_cfg iwl_cfg_ma_a0_gf4_a0 = {
      .fwname = "iwlwifi-ma-a0-gf4-a0-63.ucode",
      .uhb_supported = 1,
-@@ -12908,8 +14606,8 @@ static const struct iwl_dev_info iwl_dev_info_table[] = {
+@@ -12908,8 +14618,8 @@ static const struct iwl_dev_info iwl_dev_info_table[] = {
      IWL_DEV_INFO(0x7F70, 0x1672, iwlax211_2ax_cfg_so_gf_a0, iwl_ax211_killer_1675i_name),
  
      /* MA with GF2 */
@@ -2701,7 +2704,7 @@ index f80e5cb..35c2ef5 100644
  
      /* Qu with Jf */
      /* Qu B step */
-@@ -13188,7 +14886,7 @@ static const struct iwl_dev_info iwl_dev_info_table[] = {
+@@ -13188,7 +14898,7 @@ static const struct iwl_dev_info iwl_dev_info_table[] = {
                    IWL_CFG_MAC_TYPE_MA, IWL_CFG_ANY,
                    IWL_CFG_RF_TYPE_GF, IWL_CFG_ANY,
                    IWL_CFG_ANY, IWL_CFG_ANY, IWL_CFG_NO_CDB,
