@@ -88,6 +88,9 @@ struct xg_kms_mode {
 };
 int xg_kms_dump(char *buf, unsigned long len);
 int xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, int test, char *msg, unsigned long msglen);
+int xg_kms_set_scaled(const char *name, unsigned int w, unsigned int h, unsigned int mhz, unsigned int sw, unsigned int sh,
+    int test, char *msg, unsigned long msglen);
+int xg_kms_big(unsigned long long *phys, unsigned long long *size, unsigned int *maxw, unsigned int *maxh);
 int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
 int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
 int xg_kms_client_init(void);
@@ -1081,13 +1084,15 @@ xg_kms_after_stage4(void)
 
 /* "NAME", "NAME HZ", "NAME WxH", "NAME WxH@HZ", each optionally followed by " test"; HZ may be mHz (> 1000) */
 static int
-xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h, unsigned *mhz, int *test)
+xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h, unsigned *mhz, int *test, unsigned *sw,
+    unsigned *sh)
 {
 	const char *p = in;
 	size_t n = 0;
 
 	*w = *h = *mhz = 0;
 	*test = 0;
+	*sw = *sh = 0;
 	while (*p == ' ')
 		p++;
 	while (*p && *p != ' ' && n + 1 < nl)
@@ -1101,6 +1106,13 @@ xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h
 		if (strncmp(p, "test", 4) == 0) {
 			*test = 1;
 			p += 4;
+			continue;
+		}
+		if (strncmp(p, "src=", 4) == 0) {	/* a desktop size scaled onto the raster: src=4096x2560 */
+			*sw = (unsigned)strtoul(p + 4, (char **)&p, 10);
+			if (*p != 'x')
+				return EINVAL;
+			*sh = (unsigned)strtoul(p + 1, (char **)&p, 10);
 			continue;
 		}
 		if (!*p)
@@ -1175,6 +1187,29 @@ xg_kms_call(uintptr_t op, void *a, void *b, void *c)
 				*(int *)c = ret;
 		}
 		break;
+	case 7: {	/* [gu605-mac] set with a desktop size (HiDPI): b = uint32_t[6] {w, h, mHz, test, desktop w, desktop h} */
+		const uint32_t *v = (const uint32_t *)b;
+		char m[128];
+		if (a && v) {
+			ret = xg_kms_set_scaled((const char *)a, v[0], v[1], v[2], v[4], v[5], (int)v[3], m, sizeof(m));
+			if (c)
+				strlcpy((char *)c, m, 128);
+			if (!v[3] || ret)
+				IOLog("XeGfx: kms set (fb, desktop %ux%u%s): %s\n", v[4], v[5], v[3] ? ", test" : "", m);
+		}
+		break;
+	}
+	case 8:		/* [gu605-mac] the HiDPI framebuffer: a = uint64_t[4] out {physical address, bytes, max w, max h} */
+		if (a) {
+			unsigned long long phys = 0, size = 0;
+			unsigned int mw = 0, mh = 0;
+			ret = xg_kms_big(&phys, &size, &mw, &mh);
+			((uint64_t *)a)[0] = phys;
+			((uint64_t *)a)[1] = size;
+			((uint64_t *)a)[2] = mw;
+			((uint64_t *)a)[3] = mh;
+		}
+		break;
 	case 4:		/* hotplug count: a = unsigned * */
 		if (a) {
 			*(unsigned *)a = xg_kms_hotplugs;
@@ -1209,7 +1244,7 @@ static int
 xegfx_kms_set_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
 {
 	char in[96] = { 0 }, name[32];
-	unsigned w, h, mhz;
+	unsigned w, h, mhz, sw, sh;
 	int test, err;
 
 	if (!gKmsLock)
@@ -1220,12 +1255,13 @@ xegfx_kms_set_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
 		return EINVAL;
 	if ((err = SYSCTL_IN(req, in, req->newlen)) != 0)
 		return err;
-	if (xg_kms_parse_set(in, name, sizeof(name), &w, &h, &mhz, &test) != 0)
+	if (xg_kms_parse_set(in, name, sizeof(name), &w, &h, &mhz, &test, &sw, &sh) != 0)
 		return EINVAL;
 	if (!xg_kms_ready())
 		return ENXIO;
 	IOLockLock(gKmsLock);
-	err = xg_kms_set(name, w, h, mhz, test, gKmsMsg, sizeof(gKmsMsg));
+	err = sw ? xg_kms_set_scaled(name, w, h, mhz, sw, sh, test, gKmsMsg, sizeof(gKmsMsg))
+	    : xg_kms_set(name, w, h, mhz, test, gKmsMsg, sizeof(gKmsMsg));
 	IOLockUnlock(gKmsLock);
 	IOLog("XeGfx: kms set \"%s\": %s\n", in, gKmsMsg);
 	return err < 0 ? -err : 0;

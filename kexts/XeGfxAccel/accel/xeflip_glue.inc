@@ -374,5 +374,26 @@ static void nvXeFlipShutdown(void)
     if (xfHomeWithCopy(NVAccel::gAccel)) { for (int i = 0; i < XF_SLOTS; i++) xfRelease(i); xf_forget(&gXf); }
     IOLockUnlock(l);
 }
+// [gu605-mac] HiDPI (2026-11-13): a mode change can put another framebuffer on the plane (XeGfx keeps one per desktop
+// size next to the firmware's), and WindowServer's surfaces change size with it. So before the change the plane goes
+// back to the framebuffer it had, every slot lets go of its surface, and "boot" (the address PLANE_SURF returns to when
+// nothing is flipped) is forgotten: xf_flip reads it again from PLANE_SURF at the first flip after i915's commit. The
+// accelerator's description of the framebuffer (size, pitch, CPU mapping: the copy target) is read again too.
+static void nvXeFlipModeChange(void)
+{
+    xfAsyncDrain();
+    IOLock *l = gXfLock;
+    NVAccel *a = NVAccel::gAccel;
+    if (l) IOLockLock(l);
+    if (l && gXf.bar) {
+        // with the frame on screen copied into it first: not every "mode change" ends in a commit that redraws
+        if (gXf.boot && gXf.front != gXf.boot) (void)xfHomeWithCopy(a);
+        for (int i = 0; i < XF_SLOTS; i++) xfRelease(i);
+        xf_forget(&gXf);
+        gXf.boot = 0; gXf.front = 0;
+    }
+    if (a) a->forgetBootDesc();
+    if (l) IOLockUnlock(l);
+}
 #define XEFLIP_TRY(a, fb, head, s, pipe) nvXeFlip((a), (fb), (head), (s), (pipe))
 // </xeflip>

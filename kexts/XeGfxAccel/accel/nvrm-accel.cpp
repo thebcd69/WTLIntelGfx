@@ -111,6 +111,7 @@ static void nvaccelInstallSysctl(void);
 extern SInt64 gCntPipeInit;
 static void nvXeTraceStart(void);
 static void nvXeFlipShutdown(void);   // <xeflip>
+static void nvXeFlipModeChange(void); // [gu605-mac] HiDPI: before a display mode change (xeflip_glue.inc)
 static bool nvXeFlipAsyncBusy(const void *pipe);   // <xfasync>
 static void nvXeTxnNote(uint64_t t0);
 #endif
@@ -170,13 +171,22 @@ public:
 };
 OSDefineMetaClassAndStructors(NVEventMachine, IOAccelEventMachineFast2)
 static void (*gEnableAccel)(const char *why) = nullptr;
+#ifdef NMX_XEGFX
+static void (*gModeWillChange)(void) = nullptr;   // nvXeFlipModeChange (xeflip_glue.inc), set when the accelerator starts
+#endif
 static int gNvScanout = 0;
 static int gNvAperture = 0;
 class NVDisplayMachine : public IOAccelLegacyDisplayMachine {
     OSDeclareDefaultStructors(NVDisplayMachine)
     NM_TAHOE_FWD(NVDisplayMachine)
 public:
-    bool displayModeWillChange() APPLE_KEXT_OVERRIDE { ALOG("DM displayModeWillChange"); return true; }
+    bool displayModeWillChange() APPLE_KEXT_OVERRIDE {
+        ALOG("DM displayModeWillChange");
+#ifdef NMX_XEGFX
+        if (gModeWillChange) gModeWillChange();   // [gu605-mac] the zero-copy flip lets go of the old framebuffer
+#endif
+        return true;
+    }
     bool displayModeDidChange() APPLE_KEXT_OVERRIDE {
         ALOG("DM displayModeDidChange -> true");
         if (gEnableAccel) gEnableAccel("displayModeDidChange");
@@ -774,6 +784,16 @@ public:
     // right after such a call (N-258, panic 00:17). The boot mode never changes under us.
     struct NVRMVramRequest fBootDesc = {};
     bool fBootDescOK = false;
+    // [gu605-mac] HiDPI: another mode can mean another framebuffer memory (XeGfxIntelFB answers with the desktop's size,
+    // pitch and aperture). The mapping in use is not released at once: a frame being copied on another thread may still
+    // write through it, so it lives until the mode change after this one.
+    IOMemoryMap *fBootFBMapOld = nullptr;
+    void forgetBootDesc() {
+        if (!fBootDescOK && !fBootFBMap) return;
+        fBootDescOK = false;
+        if (fBootFBMapOld) fBootFBMapOld->release();
+        fBootFBMapOld = fBootFBMap; fBootFBMap = nullptr; fBootFBPhys = 0;
+    }
     IOReturn describeBootFramebuffer(IOFramebuffer *ifb, struct NVRMVramRequest *r) {
         if (fBootDescOK) {
             r->kva = fBootDesc.kva; r->phys = fBootDesc.phys; r->width = fBootDesc.width; r->height = fBootDesc.height;
@@ -968,6 +988,9 @@ public:
             setProperty("NVAccelSurfaceWait", 1ULL, 32);
             registerService(); ALOG("registerService() called — Metal can now find MetalPluginName=%s", "NVMTLDriver");
             gAccel = this; gEnableAccel = &NVAccel::enableFromHook;
+#ifdef NMX_XEGFX
+            gModeWillChange = &nvXeFlipModeChange;
+#endif
             for (unsigned i = 0; i < NV_CARRIERS; i++) {
                 IOAccelNVRMCarrier *c = OSTypeAlloc(IOAccelNVRMCarrier);
                 if (!c) break;

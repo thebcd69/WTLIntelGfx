@@ -621,10 +621,16 @@ public:
     }
     // the panel's size and refresh, and ValidForHiRes so the 2x sizes reach Displays settings (I-059 on NVRMFB)
     IOReturn getInformationForDisplayMode(IODisplayModeID mode, IODisplayModeInformation *info) override {
-        const XifbKmsMode *km = kmsMode(mode);
-        IOReturn r = IONDRVFramebuffer::getInformationForDisplayMode(km || mode == fBootId ? fBootId : mode, info);
+        const XifbKmsMode *km = kmsMode(mode); const XifbHi *hm = kmsHi(mode);
+        IOReturn r = IONDRVFramebuffer::getInformationForDisplayMode(km || hm || mode == fBootId ? fBootId : mode, info);
         if (r != kIOReturnSuccess || !info) return r;
         if (km) { kmsInfo(km, info); return r; }
+        if (hm) {   // a HiDPI desktop: its own size at the raster mode's refresh; never the default
+            kmsInfo(&hm->rm, info);
+            info->nominalWidth = hm->dw; info->nominalHeight = hm->dh;
+            info->flags = (info->flags & ~(UInt32)kDisplayModeDefaultFlag) | kDisplayModeNotPresetFlag;
+            return r;
+        }
         if (fHz16 && !(fGu605 && fBootId && mode == fBootId && fBootHz16)) info->refreshRate = fHz16;
         if (fGu605 && fBootId && mode == fBootId && fBootHz16) info->refreshRate = fBootHz16;
         if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }

@@ -7,7 +7,8 @@
  * into a GGTT slot once, then point PLANE_SURF at the slot. The write latches at the next vblank (no tearing), so a
  * frame costs one register write. The same two moves XgFbMove makes once at boot (fbreloc_core.h).
  *
- * Slots: XF_SLOTS ranges of 24 MiB, placed by xf_place() in ranges that read all one entry (see there); before that
+ * Slots: XF_SLOTS ranges of 40 MiB (24 MiB until 2026-11-13: a HiDPI desktop of 4096x2560 is 40 MiB, and a surface
+ * that does not fit a slot is copied instead, XF_TOO_BIG), placed by xf_place() in ranges that read all one entry (see there); before that
  * at XF_SLOT_BASE, between XgFbMove's targets 0x40000000 and 0x80000000. i915 places
  * its GGTT objects at the bottom (bottom-up) and just under GUC_GGTT_TOP (PIN_HIGH), and clears every hole to its
  * scratch entry at init, so a slot must read all-scratch before its first use; after that every entry must be scratch
@@ -25,7 +26,7 @@ typedef unsigned char xf_u8;
 
 #define XF_SLOTS		4
 #define XF_SLOT_BASE		0x50000000u
-#define XF_SLOT_STRIDE		0x01800000u		/* 24 MiB; display wants 256 KiB alignment for linear */
+#define XF_SLOT_STRIDE		0x02800000u		/* 40 MiB; display wants 256 KiB alignment for linear */
 #define XF_SLOT_PAGES		(XF_SLOT_STRIDE >> 12)
 #define XF_GSM			0x800000u		/* GGTT entries at BAR0 + 8 MiB, 8 bytes each */
 #define XF_PTE_FLAGS		(1ull | (1ull << 53))	/* present, PAT index 2 */

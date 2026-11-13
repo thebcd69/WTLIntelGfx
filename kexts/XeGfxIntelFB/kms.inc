@@ -56,6 +56,83 @@
                     m.clock_khz, m.preferred ? " preferred" : "", ok ? "offered" : "not offered");
         }
     }
+    // [gu605-mac] HiDPI (2026-11-13; owner: "%125 HiDPI ... hem dahili hem harici PG27AQDM", 60/120 Hz accepted).
+    // A desktop larger than the raster, scaled onto it by the display engine's plane scaler: 4096x2560 on the panel's
+    // 2560x1600 is what Displays shows as "2048 x 1280" (Windows' 125 %), 4096x2304 on the monitor's 2560x1440 is
+    // "2048 x 1152". XeGfx keeps one 4096x2560 object in stolen memory for these desktops (xg_kms.c); this framebuffer
+    // offers them as modes of their own (IDs kHiBase | index << 8), answers with the desktop's size and row pitch, and
+    // gives that object as its aperture while one is set. Which ones exist is asked, not assumed: every candidate goes
+    // through i915's atomic check once (the scaler multiplies the pixel rate the display clock must carry, which rules
+    // out 240 Hz and, for the 125 % desktop, 120 Hz too). The pointer is drawn by WindowServer in these modes: the
+    // cursor plane is not scaled with the desktop.
+    static constexpr IODisplayModeID kHiBase = 0x40000;
+    static constexpr int kHiMax = 12;
+    struct XifbHi { uint32_t dw, dh; XifbKmsMode rm; };
+    XifbHi fHi[kHiMax]; int fHiN = 0;
+    uint64_t fBig[4] = {};   // physical address, bytes, largest desktop w, h (0: XeGfx has none)
+    const XifbHi *kmsHi(IODisplayModeID id) const {
+        if (!fKmsUp || id < kHiBase || id >= kHiBase + (kHiMax << 8) || (id & 0xff)) return nullptr;
+        const int i = (int)((id - kHiBase) >> 8);
+        return i < fHiN ? &fHi[i] : nullptr;
+    }
+    bool kmsHiNow() const { return fCurId >= kHiBase && fCurId < kHiBase + (kHiMax << 8); }
+    bool kmsHiCommit(const XifbHi &hm, bool test) {
+        uint32_t v[6] = { hm.rm.w, hm.rm.h, hm.rm.mhz, test ? 1u : 0u, hm.dw, hm.dh }; char msg[128] = {};
+        if (test) return xifbKmsCall(7, (void *)fConnName, v, msg);
+        OSIncrementAtomic(&fKmsBusy);
+        kmsCursorPark();
+        const bool ok = xifbKmsCall(7, (void *)fConnName, v, msg);
+        XIFBLOG("display path: %s desktop %ux%u on %ux%u %u mHz -> %s (%s)", fConnName, hm.dw, hm.dh, hm.rm.w, hm.rm.h, hm.rm.mhz,
+                ok ? "committed" : "REFUSED", msg);
+        if (!ok) kmsCursorArm("after a refused commit");
+        OSDecrementAtomic(&fKmsBusy);
+        return ok;
+    }
+    // after kmsOffer, fKmsLock held: the desktops this connection can show
+    void kmsHiOffer() {
+        fHiN = 0;
+        int off = 0;
+        if (PE_parse_boot_argn("-xeintelfbnohidpi", &off, sizeof off)) return;
+        if (!fBig[0]) {
+            uint64_t b[4] = {};
+            if (!xifbKmsCall(8, b, nullptr, nullptr) || !b[0] || !b[1]) {
+                static bool said; if (!said) { said = true; XIFBLOG("display path: no HiDPI desktops (XeGfx has no framebuffer for them: an older XeGfx, or no stolen memory left)"); }
+                return;
+            }
+            bcopy(b, fBig, sizeof fBig);
+            XIFBLOG("display path: HiDPI framebuffer at 0x%llx, %llu MiB, desktops up to %llux%llu", fBig[0], fBig[1] >> 20, fBig[2], fBig[3]);
+        }
+        // the raster: the connection's preferred one, else its largest
+        const XifbKmsMode *n = nullptr;
+        for (int i = 0; i < fKmN && !n; i++) if (fKm[i].preferred && !(fKm[i].flags & 0x10) && fKm[i].mhz) n = &fKm[i];
+        if (!n) for (int i = 0; i < fKmN; i++) if (!(fKm[i].flags & 0x10) && fKm[i].mhz && (!n || (uint64_t)fKm[i].w * fKm[i].h > (uint64_t)n->w * n->h)) n = &fKm[i];
+        if (!n) return;
+        // at that raster: the mode nearest 60 Hz, and the one nearest 120 Hz when there is one
+        const XifbKmsMode *r60 = nullptr, *r120 = nullptr;
+        for (int i = 0; i < fKmN; i++) {
+            const XifbKmsMode &m = fKm[i];
+            if (m.w != n->w || m.h != n->h || (m.flags & 0x10) || !m.mhz) continue;
+            const uint32_t d60 = m.mhz > 60000 ? m.mhz - 60000 : 60000 - m.mhz, d120 = m.mhz > 120000 ? m.mhz - 120000 : 120000 - m.mhz;
+            if (d60 < 2500 && (!r60 || d60 < (r60->mhz > 60000 ? r60->mhz - 60000 : 60000 - r60->mhz))) r60 = &m;
+            if (d120 < 2500 && (!r120 || d120 < (r120->mhz > 120000 ? r120->mhz - 120000 : 120000 - r120->mhz))) r120 = &m;
+        }
+        // desktops: raster x 1.6 ("looks like" raster / 1.25: Windows' 125 %), x 1.5, x 1.25; width a multiple of 16
+        static const uint32_t num[] = { 8, 3, 5 }, den[] = { 5, 2, 4 };
+        for (unsigned k = 0; k < 3; k++) {
+            const uint32_t dw = ((n->w * num[k] / den[k]) + 8) & ~15u, dh = ((n->h * num[k] / den[k]) + 1) & ~1u;
+            if (dw > fBig[2] || dh > fBig[3] || (uint64_t)dw * 4 * dh > fBig[1]) continue;
+            const XifbKmsMode *const rr[2] = { r60, r120 };
+            for (const XifbKmsMode *r : rr) {
+                if (!r || fHiN >= kHiMax) continue;
+                XifbHi hm; hm.dw = dw; hm.dh = dh; hm.rm = *r;
+                const bool ok = kmsHiCommit(hm, true);
+                XIFBLOG("display path: %s desktop %ux%u (looks like %ux%u) on %ux%u %u.%03u Hz -> %s", fConnName, dw, dh, dw / 2, dh / 2,
+                        r->w, r->h, r->mhz / 1000, r->mhz % 1000, ok ? "offered" : "not offered (i915 refuses it)");
+                if (ok) fHi[fHiN++] = hm;
+            }
+        }
+        setProperty("XeGfxHiDPIModes", (unsigned long long)fHiN, 32);
+    }
     // the connector's modes from i915; true when it is connected. cur gets the mode on its CRTC (w == 0: none)
     bool kmsLoad(const char *name, XifbKmsMode *cur, XifbKmsMode *out, int *n) {
         const size_t sz = sizeof(XifbKmsMode) * (kKmsMax + 1);
@@ -132,6 +209,7 @@
     }
     bool kmsCursorArm(const char *why) {
         if (!fKmsUp && !gXifbKms) return false;
+        if (kmsHiNow()) return false;   // a scaled desktop: the cursor plane is in panel pixels, WindowServer draws the pointer
         if (!fCurLock || !fCurKva || !kmsCurWanted()) return false;
         const uint32_t buf = rd(XIFB_CUR_BUF), s = buf & 0xfffu, e = (buf >> 16) & 0xfffu, size = e >= s && buf ? e - s + 1 : 0;
         uint32_t cw[9] = {}, need = 0; const uint32_t en = 1u << 31, p0 = rd(0x70240);
@@ -206,7 +284,7 @@
         bcopy(fEdid, fEdidInt, sizeof fEdidInt); fEdidIntLen = fEdidLen;
         strlcpy(fConnName, "eDP-1", sizeof fConnName);
         kmsLoad(fConnName, &cur, fKm, &fKmN);
-        kmsOffer();
+        kmsOffer(); kmsHiOffer();
         fCurId = kmsIdFor(cur); fIntMhz = cur.mhz;
         fKmsUp = true;
         IOLockUnlock(fKmsLock);
@@ -243,7 +321,7 @@
             XifbKmsMode cur; bzero(&cur, sizeof cur);
             IOLockLock(fKmsLock);
             fExternal = true; gXifbExternal = true; strlcpy(fConnName, ext, sizeof fConnName);
-            kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); fCurId = kmsIdFor(cur);
+            kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); kmsHiOffer(); fCurId = kmsIdFor(cur);
             IOLockUnlock(fKmsLock);
             XIFBLOG("display path: %s has the picture (%d modes, %ux%u, EDID %d B); the panel is off", ext, en, cur.w, cur.h, fEdidLen);
             if (!quiet) kmsFireConnect("monitor connected");
@@ -253,7 +331,7 @@
             IOLockLock(fKmsLock);
             fExternal = false; gXifbExternal = false; strlcpy(fConnName, "eDP-1", sizeof fConnName);
             bcopy(fEdidInt, fEdid, sizeof fEdidInt); fEdidLen = fEdidIntLen;
-            kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); fCurId = kmsIdFor(cur);
+            kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); kmsHiOffer(); fCurId = kmsIdFor(cur);
             IOLockUnlock(fKmsLock);
             XIFBLOG("display path: monitor gone, the panel is back at %u mHz", fIntMhz);
             if (!quiet) kmsFireConnect("monitor disconnected");
@@ -265,7 +343,7 @@
             unsigned h = 0; if (xifbKmsCall(4, &h, nullptr, nullptr) && h != fKmsHot) { fKmsHot = h; kmsHotplug(); }
             // the cursor follows xeintelfb-kmscur and comes back after an i915 commit from elsewhere; a change of
             // path reaches IOFramebuffer through the connect interrupt (it asks for every cursor image again)
-            const bool want = kmsCurWanted();
+            const bool want = kmsCurWanted() && !kmsHiNow();
             if (fKmsBusy) { }
             else if (fCurReady && !want) { kmsCursorOff(); kmsFireConnect("software cursor asked for"); }
             else if (want && fCurKva && fCurLock && (!fCurReady || !fKmsCur || !(rd(XIFB_CUR_WM0) & (1u << 31)))) {
@@ -338,7 +416,8 @@ public:
         if (!fKmsUp || !fBootId) return IONDRVFramebuffer::getDisplayModeCount();
         IOItemCount n = fExternal ? 0 : 1;
         for (int i = 0; i < fKmN; i++) if (fKmOffer[i]) n++;
-        return n ? n : 1;
+        if (!n) n = 1;
+        return n + (IOItemCount)fHiN;
     }
     IOReturn getDisplayModes(IODisplayModeID *all) override {
         if (!fKmsUp || !fBootId) return IONDRVFramebuffer::getDisplayModes(all);
@@ -348,6 +427,7 @@ public:
         if (!fExternal) all[n++] = fBootId;
         for (int i = 0; i < fKmN; i++) if (fKmOffer[i]) all[n++] = kKmsBase | (i << 8);
         if (!n) all[n++] = fBootId;
+        for (int i = 0; i < fHiN; i++) all[n++] = kHiBase | (i << 8);
         IOLockUnlock(fKmsLock);
         return kIOReturnSuccess;
     }
@@ -360,6 +440,13 @@ public:
     IOReturn setDisplayMode(IODisplayModeID mode, IOIndex depth) override {
         if (!fKmsUp || !fBootId) return IONDRVFramebuffer::setDisplayMode(mode, depth);
         if (mode == fCurId) return kIOReturnSuccess;
+        if (const XifbHi *hm = kmsHi(mode)) {
+            if (!kmsHiCommit(*hm, false)) return kIOReturnUnsupportedMode;
+            fCurId = mode;   // the pointer: kmsCursorArm refuses from here on, the tick tells IOFramebuffer within a second
+            if (!fExternal) fIntMhz = hm->rm.mhz;
+            setProperty("XeGfxKmsMode", (unsigned long long)mode, 32);
+            return kIOReturnSuccess;
+        }
         const XifbKmsMode *km = kmsMode(mode);
         if (!km && (mode != fBootId || fExternal)) return kIOReturnUnsupportedMode;
         const uint32_t w = km ? km->w : fBootW, h = km ? km->h : fBootH, mhz = km ? km->mhz : (uint32_t)(((uint64_t)fBootHz16 * 1000) >> 16);
@@ -376,6 +463,7 @@ public:
     // obtain mode info", "Setting main display offline", WindowServer on a virtual display, one still frame on the
     // monitor. The flags replace the mode's safety flags (valid, safe, default) in that call.
     IOReturn connectFlags(IOIndex ci, IODisplayModeID mode, IOOptionBits *flags) override {
+        if (kmsHi(mode)) { if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag; return kIOReturnSuccess; }
         if (!kmsMode(mode)) return IONDRVFramebuffer::connectFlags(ci, mode, flags);
         if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag | (fExternal && kmsMode(mode) == kmsBest() ? kDisplayModeDefaultFlag : 0);
         return kIOReturnSuccess;
@@ -389,14 +477,23 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn setStartupDisplayMode(IODisplayModeID mode, IOIndex depth) override {
-        if (kmsMode(mode)) return kIOReturnSuccess;
+        if (kmsMode(mode) || kmsHi(mode)) return kIOReturnSuccess;
         return IONDRVFramebuffer::setStartupDisplayMode(mode, depth);
     }
     IOReturn getPixelInformation(IODisplayModeID mode, IOIndex depth, IOPixelAperture aperture, IOPixelInformation *pi) override {
-        const XifbKmsMode *km = kmsMode(mode);
-        IOReturn r = IONDRVFramebuffer::getPixelInformation(km ? fBootId : mode, depth, aperture, pi);
+        const XifbKmsMode *km = kmsMode(mode); const XifbHi *hm = kmsHi(mode);
+        IOReturn r = IONDRVFramebuffer::getPixelInformation(km || hm ? fBootId : mode, depth, aperture, pi);
         if (r == kIOReturnSuccess && km && pi) { pi->activeWidth = km->w; pi->activeHeight = km->h; }
+        if (r == kIOReturnSuccess && hm && pi) { pi->activeWidth = hm->dw; pi->activeHeight = hm->dh; pi->bytesPerRow = hm->dw * 4; }
         return r;
+    }
+    // a HiDPI desktop lives in XeGfx's object, not in the firmware's framebuffer
+    IODeviceMemory *getApertureRange(IOPixelAperture aperture) override {
+        const XifbHi *hm = kmsHi(fCurId);
+        if (!hm || aperture != kIOFBSystemAperture || !fBig[0]) return IONDRVFramebuffer::getApertureRange(aperture);
+        uint64_t bytes = ((uint64_t)hm->dw * 4 * hm->dh + 4095) & ~4095ull;
+        if (bytes > fBig[1]) bytes = fBig[1];
+        return IODeviceMemory::withRange((IOPhysicalAddress)fBig[0], (IOPhysicalLength)bytes);
     }
     // The boot mode needs its real timing too once i915 owns the display (2026-11-10). IOFramebuffer::setVBLTiming
     // turns its VBL throttle on for a mode with a detailed timing whose min and max pixel clock are equal (every i915
@@ -406,6 +503,16 @@ public:
     // panel came back on the boot mode, WindowServer got one VBL per 5 seconds: 6-7 frames/s on the panel with its
     // main thread idle 61 % of the time (sample 14:44), while the same desktop on the monitor was fluid.
     IOReturn getTimingInfoForDisplayMode(IODisplayModeID mode, IOTimingInformation *info) override {
+        if (const XifbHi *hm = kmsHi(mode)) {
+            if (!info) return kIOReturnBadArgument;
+            bzero(info, sizeof *info);
+            info->appleTimingID = kIOTimingIDInvalid;
+            info->flags = kIODetailedTimingValid | kIOScalingInfoValid;
+            kmsDetailed(&hm->rm, info->detailedInfo.v2);
+            info->detailedInfo.v2.horizontalScaled = hm->dw; info->detailedInfo.v2.verticalScaled = hm->dh;
+            info->detailedInfo.v2.scalerFlags = kIOScaleStretchToFit;
+            return kIOReturnSuccess;
+        }
         const XifbKmsMode *km = kmsMode(mode);
         if (!km && info && mode == fBootId) {
             XifbKmsMode bk;

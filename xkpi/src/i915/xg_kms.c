@@ -41,6 +41,11 @@
 #include "display/intel_dp.h"
 #include "display/intel_drrs.h"
 #include "display/intel_tc.h"
+#include "display/intel_fb.h"
+#include "gem/i915_gem_object.h"
+#include "gem/i915_gem_stolen.h"
+
+#include <drm/drm_fourcc.h>
 
 #include "xg_kms.h"
 
@@ -143,6 +148,144 @@ xg_kms_bootfb(struct drm_device *dev)
 		break;
 	}
 	return (xg_kms_fb);
+}
+
+/*
+ * [gu605-mac] HiDPI desktops (2026-11-13). A desktop larger than the raster (4096x2560 on the 2560x1600 panel is
+ * "looks like 2048x1280", Windows' 125 %) needs a framebuffer of the desktop's size and the plane scaler in front of
+ * the pipe. The firmware's framebuffer is the raster's size and cannot hold it, so one object of XG_BIG_W x XG_BIG_H
+ * is taken from the stolen memory behind it, once and for the whole boot: stolen memory is physically contiguous,
+ * which the macOS framebuffer needs for its aperture (the accelerator copies frames there when it cannot flip), and
+ * i915 scans it out like the firmware's image. A drm_framebuffer per desktop size is made over that one object,
+ * because the plane's stride comes from the framebuffer and the accelerator's zero-copy flip needs it equal to the
+ * row pitch of WindowServer's surfaces (4 * width).
+ * (intel_fbdev_fb_alloc keeps fbdev out of stolen memory on Meteor Lake, Wa_22018444074. That is about its CPU
+ * mapping through LMEMBAR; here the CPU side is the direct physical address, as it is for the firmware's image.)
+ */
+#define XG_BIG_W	4096u
+#define XG_BIG_H	2560u
+#define XG_BIG_FBS	8
+extern unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
+static struct drm_i915_gem_object *xg_big_obj;
+static unsigned long long xg_big_phys;
+static unsigned long xg_big_size;
+static struct { unsigned int w, h; struct drm_framebuffer *fb; } xg_big_fbs[XG_BIG_FBS];
+static char xg_big_why[128] = "not asked for yet";
+
+static int
+xg_kms_big_obj(struct drm_i915_private *i915)
+{
+	struct drm_i915_gem_object *obj;
+	unsigned long size = PAGE_ALIGN((unsigned long)XG_BIG_W * 4 * XG_BIG_H);
+	u64 dsm;
+
+	if (xg_big_obj != NULL)
+		return (0);
+	obj = i915_gem_object_create_stolen(i915, size);
+	if (IS_ERR(obj)) {
+		snprintf(xg_big_why, sizeof(xg_big_why), "no %lu MiB of stolen memory left (error %ld; stolen usable %llu MiB)",
+		    size >> 20, PTR_ERR(obj), (unsigned long long)i915->dsm.usable_size >> 20);
+		return ((int)PTR_ERR(obj));
+	}
+	if (obj->stolen == NULL) {
+		snprintf(xg_big_why, sizeof(xg_big_why), "the object is not in stolen memory");
+		i915_gem_object_put(obj);
+		return (-ENODEV);
+	}
+	/* stolen offset 0 is DSMBASE; the firmware's image sits at offset 0 (its GGTT address, which XgFbMove made 0) */
+	dsm = intel_uncore_read64(&i915->uncore, GEN6_DSMBASE) & GEN11_BDSM_MASK;
+	if (dsm == 0)
+		dsm = xg_boot_fb_phys;
+	if (dsm == 0) {
+		snprintf(xg_big_why, sizeof(xg_big_why), "the stolen memory's physical address is not known");
+		i915_gem_object_put(obj);
+		return (-ENXIO);
+	}
+	xg_big_phys = dsm + obj->stolen->start;
+	xg_big_size = size;
+	xg_big_obj = obj;	/* the reference is kept for good */
+	snprintf(xg_big_why, sizeof(xg_big_why), "%ux%u at stolen 0x%llx, physical 0x%llx (DSM 0x%llx, boot image 0x%llx)",
+	    XG_BIG_W, XG_BIG_H, (unsigned long long)obj->stolen->start, xg_big_phys, (unsigned long long)dsm, xg_boot_fb_phys);
+	drm_info(&i915->drm, "xegfx: HiDPI framebuffer: %s\n", xg_big_why);
+	return (0);
+}
+
+/* the framebuffer for a sw x sh desktop over the HiDPI object (made once per size) */
+static struct drm_framebuffer *
+xg_kms_big_fb(struct drm_i915_private *i915, unsigned int sw, unsigned int sh, char *msg, unsigned long msglen)
+{
+	struct drm_mode_fb_cmd2 cmd = {};
+	struct drm_framebuffer *fb;
+	int i, ret;
+
+	if (sw < 640 || sh < 480 || sw > XG_BIG_W || sh > XG_BIG_H || (sw & 15) || (sh & 1)) {
+		snprintf(msg, msglen, "desktop %ux%u: at most %ux%u, width a multiple of 16", sw, sh, XG_BIG_W, XG_BIG_H);
+		return (NULL);
+	}
+	if ((ret = xg_kms_big_obj(i915)) != 0) {
+		snprintf(msg, msglen, "HiDPI framebuffer: %s", xg_big_why);
+		return (NULL);
+	}
+	for (i = 0; i < XG_BIG_FBS; i++)
+		if (xg_big_fbs[i].fb != NULL && xg_big_fbs[i].w == sw && xg_big_fbs[i].h == sh)
+			return (xg_big_fbs[i].fb);
+	for (i = 0; i < XG_BIG_FBS && xg_big_fbs[i].fb != NULL; i++)
+		;
+	if (i == XG_BIG_FBS) {
+		snprintf(msg, msglen, "more than %d desktop sizes", XG_BIG_FBS);
+		return (NULL);
+	}
+	cmd.width = sw;
+	cmd.height = sh;
+	cmd.pitches[0] = sw * 4;
+	cmd.pixel_format = DRM_FORMAT_XRGB8888;
+	cmd.modifier[0] = DRM_FORMAT_MOD_LINEAR;
+	fb = intel_framebuffer_create(intel_bo_to_drm_bo(xg_big_obj), &cmd);
+	if (IS_ERR(fb)) {
+		snprintf(msg, msglen, "framebuffer %ux%u: error %ld", sw, sh, PTR_ERR(fb));
+		return (NULL);
+	}
+	xg_big_fbs[i].w = sw;
+	xg_big_fbs[i].h = sh;
+	xg_big_fbs[i].fb = fb;	/* kept for good */
+	return (fb);
+}
+
+static bool
+xg_kms_ours(const struct drm_framebuffer *fb)
+{
+	int i;
+
+	if (fb == NULL)
+		return (false);
+	if (fb == xg_kms_fb)
+		return (true);
+	for (i = 0; i < XG_BIG_FBS; i++)
+		if (xg_big_fbs[i].fb == fb)
+			return (true);
+	return (false);
+}
+
+/* for the macOS framebuffer: where the HiDPI object is (made now if it can be). 0 or a negative errno */
+int
+xg_kms_big(unsigned long long *phys, unsigned long long *size, unsigned int *maxw, unsigned int *maxh)
+{
+	struct drm_i915_private *i915 = xg_kms_i915();
+	int ret;
+
+	if (i915 == NULL)
+		return (-ENODEV);
+	if ((ret = xg_kms_big_obj(i915)) != 0)
+		return (ret);
+	if (phys)
+		*phys = xg_big_phys;
+	if (size)
+		*size = xg_big_size;
+	if (maxw)
+		*maxw = XG_BIG_W;
+	if (maxh)
+		*maxh = XG_BIG_H;
+	return (0);
 }
 
 static void
@@ -248,6 +391,13 @@ xg_kms_dump(char *buf, unsigned long len)
 		xg_out(&b, " bootfb %ux%u pitch %u format 0x%08x modifier 0x%llx", fb->width, fb->height, fb->pitches[0],
 		    fb->format->format, (unsigned long long)fb->modifier);
 	xg_out(&b, "\n");
+	xg_out(&b, "hidpi: %s; stolen usable %llu MiB\n", xg_big_why, (unsigned long long)i915->dsm.usable_size >> 20);
+	drm_for_each_crtc(crtc, dev)
+		if (crtc->primary != NULL && crtc->primary->state != NULL && crtc->primary->state->fb != NULL)
+			xg_out(&b, "plane %s on %s: fb %ux%u pitch %u, src %ux%u -> %dx%d\n", crtc->primary->name, crtc->name,
+			    crtc->primary->state->fb->width, crtc->primary->state->fb->height, crtc->primary->state->fb->pitches[0],
+			    crtc->primary->state->src_w >> 16, crtc->primary->state->src_h >> 16, crtc->primary->state->crtc_w,
+			    crtc->primary->state->crtc_h);
 	/* what i915 really runs with (the tunables reach it only through xg_sysctl_reload_tunables at stage 4) */
 	xg_out(&b, "params disable_display %d enable_psr %d enable_fbc %d enable_dc %d enable_dpcd_backlight %d\n",
 	    (int)i915->display.params.disable_display, i915->display.params.enable_psr, i915->display.params.enable_fbc,
@@ -295,10 +445,30 @@ xg_kms_connector(struct drm_device *dev, const char *name)
  * The mode on `name`: w x h at the refresh closest to mhz. w == 0: the preferred mode's raster; mhz == 0: the preferred
  * mode itself (no raster) or the fastest at that raster. Turns every other CRTC off. test != 0: atomic check only. Returns 0 or a negative errno; msg says why.
  */
+static int
+xg_kms_set2(const char *name, unsigned int w, unsigned int h, unsigned int mhz, unsigned int sw, unsigned int sh, int test,
+    char *msg, unsigned long msglen);
+
 int
 xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, int test, char *msg, unsigned long msglen)
 {
+	return (xg_kms_set2(name, w, h, mhz, 0, 0, test, msg, msglen));
+}
+
+/* [gu605-mac] the same with a desktop of sw x sh scaled onto the mode's raster by the plane scaler (HiDPI, see above) */
+int
+xg_kms_set_scaled(const char *name, unsigned int w, unsigned int h, unsigned int mhz, unsigned int sw, unsigned int sh,
+    int test, char *msg, unsigned long msglen)
+{
+	return (xg_kms_set2(name, w, h, mhz, sw, sh, test, msg, msglen));
+}
+
+static int
+xg_kms_set2(const char *name, unsigned int w, unsigned int h, unsigned int mhz, unsigned int sw, unsigned int sh, int test,
+    char *msg, unsigned long msglen)
+{
 	struct drm_i915_private *i915 = xg_kms_i915();
+	struct drm_framebuffer *big = NULL;
 	struct drm_modeset_acquire_ctx ctx;
 	struct drm_connector_list_iter it;
 	struct drm_connector *connector, *c;
@@ -386,6 +556,14 @@ xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, i
 		drm_connector_put(connector);
 		return (-EINVAL);
 	}
+	/* the desktop's framebuffer first, outside the modeset locks (it may allocate) */
+	if (sw != 0 && sh != 0 && (sw != mode.hdisplay || sh != mode.vdisplay)) {
+		if ((big = xg_kms_big_fb(i915, sw, sh, msg, msglen)) == NULL) {
+			drm_connector_put(connector);
+			return (-ENOSPC);
+		}
+	} else
+		sw = sh = 0;
 	enc = intel_attached_encoder(to_intel_connector(connector));
 	state = drm_atomic_state_alloc(dev);
 	if (state == NULL || enc == NULL) {
@@ -403,7 +581,9 @@ retry:
 	if (ret)
 		goto out;
 	fb = xg_kms_bootfb(dev);
-	if (fb == NULL || mode.hdisplay > fb->width || mode.vdisplay > fb->height) {
+	if (big != NULL)
+		fb = big;
+	else if (fb == NULL || mode.hdisplay > fb->width || mode.vdisplay > fb->height) {
 		snprintf(msg, msglen, "mode %ux%u does not fit the boot framebuffer %ux%u", mode.hdisplay, mode.vdisplay,
 		    fb ? fb->width : 0, fb ? fb->height : 0);
 		ret = -ENOSPC;
@@ -415,7 +595,7 @@ retry:
 	 * encoder can use.
 	 */
 	drm_for_each_crtc(crtc, dev)
-		if (crtc->state->enable && crtc->primary->state != NULL && crtc->primary->state->fb == fb &&
+		if (crtc->state->enable && crtc->primary->state != NULL && xg_kms_ours(crtc->primary->state->fb) &&
 		    (enc->base.possible_crtcs & drm_crtc_mask(crtc))) {
 			target = crtc;
 			break;
@@ -504,8 +684,8 @@ retry:
 	plane_state->crtc_h = mode.vdisplay;
 	plane_state->src_x = 0;
 	plane_state->src_y = 0;
-	plane_state->src_w = mode.hdisplay << 16;
-	plane_state->src_h = mode.vdisplay << 16;
+	plane_state->src_w = (big != NULL ? sw : mode.hdisplay) << 16;
+	plane_state->src_h = (big != NULL ? sh : mode.vdisplay) << 16;
 	plane_state->rotation = DRM_MODE_ROTATE_0;
 	ret = test ? drm_atomic_check_only(state) : drm_atomic_commit(state);
 out:
@@ -514,7 +694,11 @@ out:
 		drm_modeset_backoff(&ctx);
 		goto retry;
 	}
-	if (ret == 0)
+	if (ret == 0 && big != NULL)
+		snprintf(msg, msglen, "%s %s desktop %ux%u on %ux%u %u.%03u Hz clock %d on %s", test ? "test ok" : "committed",
+		    name, sw, sh, mode.hdisplay, mode.vdisplay, xg_mode_mhz(&mode) / 1000, xg_mode_mhz(&mode) % 1000, mode.clock,
+		    target ? target->name : "?");
+	else if (ret == 0)
 		snprintf(msg, msglen, "%s %s %ux%u %u.%03u Hz clock %d on %s", test ? "test ok" : "committed", name,
 		    mode.hdisplay, mode.vdisplay, xg_mode_mhz(&mode) / 1000, xg_mode_mhz(&mode) % 1000, mode.clock,
 		    target ? target->name : "?");

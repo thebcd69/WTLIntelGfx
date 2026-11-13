@@ -12,6 +12,9 @@ struct xg_kms_mode {
 
 int xg_kms_dump(char *buf, unsigned long len);
 int xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, int test, char *msg, unsigned long msglen);
+int xg_kms_set_scaled(const char *name, unsigned int w, unsigned int h, unsigned int mhz, unsigned int sw, unsigned int sh,
+    int test, char *msg, unsigned long msglen);
+int xg_kms_big(unsigned long long *phys, unsigned long long *size, unsigned int *maxw, unsigned int *maxh);
 int xg_kms_backlight(int permille, char *msg, unsigned long msglen);
 int xg_kms_modes(const char *name, struct xg_kms_mode *out, int max, int *connected, struct xg_kms_mode *cur);
 int xg_kms_client_init(void);

@@ -1,0 +1,78 @@
+# gu605-mac: XeGfx.kext alone (drm, TTM, i915, LinuxKPI on XNU), for Mac-side test builds of the KMS bridge. The same
+# steps as gu605.yml's arm job up to the kext, nothing else (no Mesa, no plugin): about ten minutes. Publishes a
+# prerelease xegfx-mac-<shortsha> with XeGfx.kext zipped, its SHA-256 and the build log.
+name: gu605-mac-xegfx
+on:
+  push:
+    branches: [gu605-mac]
+    paths:
+      - 'xkpi/**'
+      - 'shim/**'
+      - '.github/workflows/gu605-mac-xegfx.yml'
+permissions:
+  contents: write
+concurrency:
+  group: gu605-mac-xegfx
+  cancel-in-progress: true
+env:
+  DRM_KMOD_REV: c16de0f9fa84f70b9551f69fde837a7f3a73c0e9   # as gu605.yml
+  FREEBSD_REV: d2145e9
+  XNU_TAG: xnu-11215.81.4
+jobs:
+  xegfx:
+    runs-on: ${{ vars.GU605_ARM_RUNNER || 'macos-26' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          XC=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] && sudo xcode-select -s "$XC/Contents/Developer"
+          sw_vers; uname -m; xcodebuild -version || true
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          xcrun clang --version | head -1
+      - name: Sources for XeGfx (drm-kmod, FreeBSD, xnu export lists)
+        run: |
+          set -euo pipefail
+          S=$HOME/src/xe-src; mkdir -p "$S"
+          git init -q "$S/drm-kmod"; git -C "$S/drm-kmod" remote add origin https://github.com/freebsd/drm-kmod.git
+          git -C "$S/drm-kmod" fetch -q --depth 1 origin "$DRM_KMOD_REV"; git -C "$S/drm-kmod" checkout -q FETCH_HEAD
+          git clone -q --filter=tree:0 --no-checkout https://github.com/freebsd/freebsd-src.git "$S/freebsd"
+          git -C "$S/freebsd" sparse-checkout set --no-cone '/sys/*' '!/sys/contrib/*' '/sys/contrib/ck/' '/sys/contrib/dev/acpica/' \
+            '!/sys/arm/' '!/sys/arm64/' '!/sys/riscv/' '!/sys/powerpc/' '!/sys/i386/' '!/sys/modules/' '!/sys/gnu/'
+          git -C "$S/freebsd" checkout -q "$FREEBSD_REV"
+          git clone -q --depth 1 --branch "$XNU_TAG" --filter=blob:none --sparse https://github.com/apple-oss-distributions/xnu.git "$HOME/src/xnu"
+          git -C "$HOME/src/xnu" sparse-checkout set config
+          echo "XEGFX_XNU_EXPORTS=$HOME/src/xnu/config" >> "$GITHUB_ENV"
+      - name: Firmware (linux-firmware i915, SHA-256 checked)
+        run: |
+          set -euo pipefail
+          python3 -I gu605/tools/fetch_firmware.py --lock gu605/firmware.lock --out "$HOME/src/xe-src/linux-firmware"
+      - name: XeGfx.kext
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          export XEGFX_FW=$HOME/src/xe-src/linux-firmware
+          bash build/build_xegfx.sh 2>&1 | tee out/build-xegfx.log
+          test -f out/XeGfx.kext/Contents/MacOS/XeGfx; lipo -archs out/XeGfx.kext/Contents/MacOS/XeGfx
+          strings -a out/XeGfx.kext/Contents/MacOS/XeGfx | grep -c 'HiDPI framebuffer' || true
+          cp "$XEGFX_FW/FIRMWARE.txt" out/FIRMWARE.txt
+          (cd out && ditto -c -k --keepParent XeGfx.kext XeGfx.kext.zip && shasum -a 256 XeGfx.kext.zip XeGfx.kext/Contents/MacOS/XeGfx XeGfx.kext/Contents/Info.plist > SHA256SUMS && cat SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xegfx-logs
+          path: |
+            out/*.log
+            out/score.log
+            out/link/ld.txt
+          if-no-files-found: ignore
+      - name: Prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          T=xegfx-mac-$(git rev-parse --short HEAD)
+          gh release view "$T" >/dev/null 2>&1 && { echo "release $T exists"; exit 0; }
+          gh release create "$T" out/XeGfx.kext.zip out/SHA256SUMS out/FIRMWARE.txt out/build-xegfx.log --prerelease --target "$(git rev-parse HEAD)" \
+            --title "$T (XeGfx.kext, GU605 Mac-side test build)" \
+            --notes "XeGfx.kext alone, built from gu605-mac at $(git rev-parse --short HEAD). KMS bridge: HiDPI desktops (a 4096x2560 object in stolen memory, plane scaler). Test build for the GU605; the other kexts and the plugin are not in it."
