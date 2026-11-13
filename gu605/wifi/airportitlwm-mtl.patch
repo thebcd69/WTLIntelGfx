@@ -45,10 +45,10 @@ index ad515a6..4cbd417 100644
      super::probe(provider, score);
 diff --git a/itl80211/linux/mtl_ringlog.h b/itl80211/linux/mtl_ringlog.h
 new file mode 100644
-index 0000000..4610a70
+index 0000000..b006c49
 --- /dev/null
 +++ b/itl80211/linux/mtl_ringlog.h
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,90 @@
 +/*
 + * mtl_ringlog.h — MTL bring-up aid (thebcd69/itlwm, branch mtl).
 + *
@@ -106,7 +106,12 @@ index 0000000..4610a70
 +    UInt32 start = (UInt32)OSAddAtomic(n, &r.pos) & 0x7FFFFFFFu;
 +    for (int i = 0; i < n; i++)
 +        r.buf[(start + (UInt32)i) % MTL_RING_SIZE] = line[i];
++    /* (AirportItlwm build) ring only: with -v every IOLog line is drawn on the 2560x1440 text console, and this
++     * driver writes hundreds of lines at start and ~23 per scan (GU605 2026-11-13: the screen was full of them and
++     * other kexts' starts took seconds). Read the ring with: sysctl -b debug.itlwm_log */
++#ifdef MTL_RING_IOLOG
 +    IOLog("%s", line);
++#endif
 +}
 +
 +/* Publish the ring (oldest first) as "MTL-Log" on `nub`. Safe to call repeatedly. */
