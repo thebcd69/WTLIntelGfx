@@ -43,7 +43,8 @@ extern "C" void itlwm_ringlog(const char *fmt, ...)
     va_end(ap);
     if (n <= 0) return;
     if (n >= (int)sizeof(line)) n = sizeof(line) - 1;
-    if (strnstr(line, "taskq", sizeof(line))) return;
+    // (no strnstr: it is not exported to kexts; kmutil refused a kext that used it, 2026-11-13)
+    for (int i = 0; i + 5 <= n; i++) if (line[i] == 't' && !memcmp(line + i, "taskq", 5)) return;
     IOLog("%s", line);
     SInt32 off = OSAddAtomic(n, &gItlRingLen);
     if (off >= 0 && off + n <= (SInt32)sizeof(gItlRing)) memcpy(gItlRing + off, line, n);

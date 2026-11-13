@@ -153,7 +153,9 @@
         char env[512] = {}; size_t el = sizeof env - 1;
         if (xbSysctl("xegfx_env", env, &el, nullptr, 0)) { bootSay("FAILED: cannot read debug.xegfx_env"); return; }
         env[sizeof env - 1] = 0;
-        if (!strnstr(env, "xegfx.kms=1", sizeof env)) {
+        bool has = false;   // (strnstr is not exported to kexts)
+        for (size_t i = 0, n = strlen(env); i + 11 <= n && !has; i++) has = !memcmp(env + i, "xegfx.kms=1", 11);
+        if (!has) {
             if (strlcat(env, " xegfx.kms=1", sizeof env) >= sizeof env || xbSysctl("xegfx_env", nullptr, nullptr, env, strlen(env))) { bootSay("FAILED: cannot write debug.xegfx_env"); return; }
         }
         for (int s = 3; s <= 7; s++) if (!bootStage(s)) return;
