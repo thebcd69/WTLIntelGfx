@@ -1,2 +1,3 @@
 out/
 shim/fbsd/
+__pycache__/
