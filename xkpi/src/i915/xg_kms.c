@@ -172,6 +172,23 @@ static unsigned long xg_big_size;
 static struct { unsigned int w, h; struct drm_framebuffer *fb; } xg_big_fbs[XG_BIG_FBS];
 static char xg_big_why[128] = "not asked for yet";
 
+/* the largest free run of stolen memory, in bytes (what the HiDPI object could have had) */
+static u64
+xg_stolen_hole(struct drm_i915_private *i915)
+{
+	struct drm_mm_node *pos;
+	u64 hs, he, best = 0;
+
+	if (!drm_mm_initialized(&i915->mm.stolen))
+		return (0);
+	mutex_lock(&i915->mm.stolen_lock);
+	drm_mm_for_each_hole(pos, &i915->mm.stolen, hs, he)
+		if (he - hs > best)
+			best = he - hs;
+	mutex_unlock(&i915->mm.stolen_lock);
+	return (best);
+}
+
 static int
 xg_kms_big_obj(struct drm_i915_private *i915)
 {
@@ -181,10 +198,16 @@ xg_kms_big_obj(struct drm_i915_private *i915)
 
 	if (xg_big_obj != NULL)
 		return (0);
+	if (xg_kms_fb == NULL) {	/* no caller holds a modeset lock here */
+		drm_modeset_lock_all(&i915->drm);
+		(void)xg_kms_bootfb(&i915->drm);
+		drm_modeset_unlock_all(&i915->drm);
+	}
 	obj = i915_gem_object_create_stolen(i915, size);
 	if (IS_ERR(obj)) {
-		snprintf(xg_big_why, sizeof(xg_big_why), "no %lu MiB of stolen memory left (error %ld; stolen usable %llu MiB)",
-		    size >> 20, PTR_ERR(obj), (unsigned long long)i915->dsm.usable_size >> 20);
+		snprintf(xg_big_why, sizeof(xg_big_why), "no %lu MiB of stolen memory in one piece (error %ld; usable %llu MiB, "
+		    "largest free run %llu KiB)", size >> 20, PTR_ERR(obj), (unsigned long long)i915->dsm.usable_size >> 20,
+		    (unsigned long long)xg_stolen_hole(i915) >> 10);
 		return ((int)PTR_ERR(obj));
 	}
 	if (obj->stolen == NULL) {
@@ -192,14 +215,36 @@ xg_kms_big_obj(struct drm_i915_private *i915)
 		i915_gem_object_put(obj);
 		return (-ENODEV);
 	}
-	/* stolen offset 0 is DSMBASE; the firmware's image sits at offset 0 (its GGTT address, which XgFbMove made 0) */
-	dsm = intel_uncore_read64(&i915->uncore, GEN6_DSMBASE) & GEN11_BDSM_MASK;
-	if (dsm == 0)
-		dsm = xg_boot_fb_phys;
-	if (dsm == 0) {
-		snprintf(xg_big_why, sizeof(xg_big_why), "the stolen memory's physical address is not known");
-		i915_gem_object_put(obj);
-		return (-ENXIO);
+	/*
+	 * Where stolen offset 0 is in physical memory. Not from a register alone (a wrong answer here would hand macOS
+	 * someone else's memory as its framebuffer): from the firmware's image, whose physical address came out of its GGTT
+	 * entry at stage 2 (xg_boot_fb_phys) and whose place in stolen memory i915 recorded when it took the image over.
+	 * The firmware's own word for the base (DSMBASE, or BDSM in the device's configuration space, the one Linux's early
+	 * quirk reads on this platform) is the cross-check: one of the two has to agree, or there are no HiDPI desktops.
+	 */
+	{
+		struct drm_gem_object *bg = xg_kms_fb != NULL ? intel_fb_bo(xg_kms_fb) : NULL;
+		struct drm_i915_gem_object *bo = bg != NULL ? to_intel_bo(bg) : NULL;
+		u64 reg = intel_uncore_read64(&i915->uncore, GEN6_DSMBASE) & GEN11_BDSM_MASK, cfg;
+		u32 lo = 0, hi = 0;
+
+		pci_read_config_dword(to_pci_dev(i915->drm.dev), 0xc0, &lo);	/* INTEL_GEN11_BSM_DW0/DW1 */
+		pci_read_config_dword(to_pci_dev(i915->drm.dev), 0xc4, &hi);
+		cfg = (((u64)hi << 32) | lo) & GEN11_BDSM_MASK;
+		if (cfg == GEN11_BDSM_MASK)
+			cfg = 0;
+
+		dsm = 0;
+		if (bo != NULL && bo->stolen != NULL && xg_boot_fb_phys != 0 && xg_boot_fb_phys >= bo->stolen->start)
+			dsm = xg_boot_fb_phys - bo->stolen->start;
+		if (dsm == 0 || (dsm & 0xfffff) != 0 || (reg != dsm && cfg != dsm)) {
+			snprintf(xg_big_why, sizeof(xg_big_why),
+			    "stolen base not certain (boot image 0x%llx at stolen 0x%llx, DSMBASE 0x%llx, BDSM 0x%llx)",
+			    xg_boot_fb_phys, bo != NULL && bo->stolen != NULL ? (unsigned long long)bo->stolen->start : ~0ull,
+			    (unsigned long long)reg, (unsigned long long)cfg);
+			i915_gem_object_put(obj);
+			return (-ENXIO);
+		}
 	}
 	xg_big_phys = dsm + obj->stolen->start;
 	xg_big_size = size;
@@ -391,7 +436,8 @@ xg_kms_dump(char *buf, unsigned long len)
 		xg_out(&b, " bootfb %ux%u pitch %u format 0x%08x modifier 0x%llx", fb->width, fb->height, fb->pitches[0],
 		    fb->format->format, (unsigned long long)fb->modifier);
 	xg_out(&b, "\n");
-	xg_out(&b, "hidpi: %s; stolen usable %llu MiB\n", xg_big_why, (unsigned long long)i915->dsm.usable_size >> 20);
+	xg_out(&b, "hidpi: %s; stolen usable %llu MiB, largest free run %llu KiB\n", xg_big_why,
+	    (unsigned long long)i915->dsm.usable_size >> 20, (unsigned long long)xg_stolen_hole(i915) >> 10);
 	drm_for_each_crtc(crtc, dev)
 		if (crtc->primary != NULL && crtc->primary->state != NULL && crtc->primary->state->fb != NULL)
 			xg_out(&b, "plane %s on %s: fb %ux%u pitch %u, src %ux%u -> %dx%d\n", crtc->primary->name, crtc->name,
