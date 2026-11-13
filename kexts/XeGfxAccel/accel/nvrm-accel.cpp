@@ -668,6 +668,30 @@ public:
     }
     void onCountGrewLocked() {
         deliverModeChange();
+        markArmedLocked();
+    }
+#ifdef NMX_XEGFX
+    // [gu605-mac] 2026-11-13, debug.nvaccel_prearm=1: armed BEFORE the framebuffer's first open, without touching it.
+    // debug.nvaccelfb=1 at that point panicked (boot 18:28, uptime 67 s, process sysctl: nvaccelfb_sysctl ->
+    // registerFramebufferLocked -> deliverModeChange -> IOAcceleratorFamily2 -> IOGraphicsFamily, page fault): the
+    // made-up mode change walks into an IONDRVFramebuffer nobody has opened yet. Nothing of that is needed before the
+    // open: when WindowServer opens the framebuffer with this accelerator already attached, the family registers it and
+    // makes the pipe itself (13:58 boot: "newDisplayPipe" in WindowServer's thread, then the real will/did change, 2 s
+    // before any debug.nvaccelfb write). What WindowServer must find at that moment are the switches: the scan-out
+    // gate open, and debug.nvaccelfb reading 1 for the plugin's armed-only check. So this sets them and nothing else:
+    // no found_framebuffer, no mode change, no call into the framebuffer.
+    static bool prearmFromSysctl() {
+        if (!gAccel) { ALOG("sysctl debug.nvaccel_prearm=1 but no NVAccel is running"); return false; }
+        if (gAccel->fRegLock) IOLockLock(gAccel->fRegLock);
+        gNvScanout = 1;
+        ALOG("prearm: scan-out gate open; armed without registering anything (framebuffer count %u, heads published 0x%x): "
+             "the family registers the framebuffer when WindowServer opens it", gAccel->fDM ? gAccel->fDM->getFramebufferCount() : 0u, gNvHeadsPublished);
+        gAccel->markArmedLocked();
+        if (gAccel->fRegLock) IOLockUnlock(gAccel->fRegLock);
+        return true;
+    }
+#endif
+    void markArmedLocked() {
         gNvAccelArmed = 1;
         if (fMetalPlugin && !getProperty("MetalPluginName")) {
             setProperty("MetalPluginName", fMetalPlugin);
@@ -1808,6 +1832,22 @@ static int nvaccelfb_sysctl SYSCTL_HANDLER_ARGS
 SYSCTL_PROC(_debug, OID_AUTO, nvaccelfb, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_KERN,
             NULL, 0, nvaccelfb_sysctl, "I",
             "register the NVIDIA framebuffer with the accelerator display machine (1 = found_framebuffer, 2 = family sweep)");
+#ifdef NMX_XEGFX
+static int gNvPrearmed = 0;
+static int nvaccelprearm_sysctl SYSCTL_HANDLER_ARGS
+{
+    int v = gNvPrearmed;
+    int err = sysctl_handle_int(oidp, &v, 0, req);
+    if (err || req->newptr == 0) return err;
+    if (v != 1) return EINVAL;
+    if (!NVAccel::prearmFromSysctl()) return ENXIO;
+    gNvPrearmed = 1;
+    return 0;
+}
+SYSCTL_PROC(_debug, OID_AUTO, nvaccel_prearm, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED | CTLFLAG_KERN,
+            NULL, 0, nvaccelprearm_sysctl, "I",
+            "1 = open the scan-out gate and read as armed without registering or touching the framebuffer (before its first open)");
+#endif
 #define NVACCEL_CNT(nm, var, desc) SYSCTL_QUAD(_debug, OID_AUTO, nm, CTLFLAG_RD | CTLFLAG_LOCKED, (SInt64 *)&var, desc)
 NVACCEL_CNT(nvaccel_vm_alloc,         gCntVmAlloc,        "NVVidMemory::allocPhysical successes");
 NVACCEL_CNT(nvaccel_vm_alloc_bytes,   gCntVmAllocBytes,   "bytes of VRAM granted to NVVidMemory");
@@ -2058,6 +2098,7 @@ static void nvaccelInstallSysctl(void)
       sysctl_register_oid(&sysctl__debug_nvaccel_pipe_init);     sysctl_register_oid(&sysctl__debug_nvaccel_pipe_validate);
       sysctl_register_oid(&sysctl__debug_nvaccel_pipe_complete); sysctl_register_oid(&sysctl__debug_nvaccel_pipe_perform); }
     nvXeTraceStart();
+    sysctl_register_oid(&sysctl__debug_nvaccel_prearm);   // [gu605-mac] armed before the framebuffer's first open
 #endif
     sysctl_register_oid(&sysctl__debug_nvaccel_heads_published); sysctl_register_oid(&sysctl__debug_nvaccel_heads_registered);
     sysctl_register_oid(&sysctl__debug_nvaccel_heads_piped);

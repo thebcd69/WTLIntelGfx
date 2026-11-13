@@ -45,9 +45,9 @@ etime_s() { awk -F'[-:]' '{ n = NF; s = $n + 60 * $(n-1); if (n >= 3) s += 3600 
 #   reads 0 -- no device"; the accelerator's pipe got "scanout gate CLOSED".
 # The stages had been at 7 since 13:59:46. The only thing that kept the arming until after that open was the wait for
 # display0 just below, which cannot come before the open. With one framebuffer (XeGfxIntelFB's, on the iGPU itself) the
-# accelerator's head 4 can be no other, so in that case the arming is done at once: WindowServer's first look at the
-# GPU then finds it armed and the gate open, and nothing has to be restarted. AGDC comes last here: if its
-# registration is what WindowServer waits for, everything else is in place when the wait ends.
+# accelerator's head 4 can be no other, so in that case the arming is done at once (debug.nvaccel_prearm, see below):
+# WindowServer's first look at the GPU then finds it armed and the gate open, and nothing has to be restarted. AGDC
+# comes last here: if its registration is what WindowServer waits for, everything else is in place when the wait ends.
 # 15:01 boot the same day, a cold Eco boot: no such 60 s wait (it came from the powered-off NVIDIA device still being in
 # the registry); WindowServer opened the framebuffer 2.5 s after XeGfxIntelFB's start, long before stage 7. So the kext
 # can now hold IOKit busy after its start (boot.inc, nvram xeintelfb-hold=1, debug.xeintelfb_hold reads 1): the runner
@@ -59,7 +59,8 @@ if [ "$EARLY" = 1 ]; then
   nfb=$(ioreg -r -c IOFramebuffer -d 1 2>/dev/null | grep -c '^+-o ')
   for i in $(seq 1 20); do hp=$(sysctl -n debug.nvaccel_heads_published 2>/dev/null); [ $(( ${hp:-0} & 16 )) != 0 ] && break; sleep 0.5; done
   cu=$(stat -f %Su /dev/console 2>/dev/null)
-  if has_d0; then say "early: WindowServer has already opened the framebuffer (display0 is there): the usual path"; EARLY=0
+  if ! sysctl -n debug.nvaccel_prearm > /dev/null 2>&1; then say "early: this XeGfxAccel has no debug.nvaccel_prearm (it cannot arm before the first open): the usual path"; EARLY=0
+  elif has_d0; then say "early: WindowServer has already opened the framebuffer (display0 is there): the usual path"; EARLY=0
   elif [ "$nfb" != 1 ]; then say "early: $nfb framebuffers, not 1: the usual path"; EARLY=0
   elif [ $(( ${hp:-0} & 16 )) = 0 ]; then say "early: the accelerator has no head 4 yet (published 0x$(printf %x "${hp:-0}")): the usual path"; EARLY=0
   elif [ "$(sysctl -n debug.xeintelfb_hold 2>/dev/null)" != 1 ] && [ "$wse" -gt "$(conf EARLY_ARM_MAX_WS_S 55)" ]; then say "early: WindowServer $ws is ${wse}s old (its wait for the GPU ends about 74 s after its start): too late, the usual path"; EARLY=0
@@ -69,9 +70,12 @@ if [ "$EARLY" = 1 ]; then
   say "early: arming before WindowServer's first display start (WindowServer $ws is ${wse}s old, no display0, heads published 0x$(printf %x "$hp"))"
   why=""
   if [ "$(conf K5 1)" = 1 ]; then sysctl -w debug.xegfx_agdc_k5=1 > /dev/null || why="debug.xegfx_agdc_k5=1 failed"; fi
-  [ -n "$why" ] || sysctl -w debug.nvaccelfb=1 > /dev/null || why="debug.nvaccelfb=1 failed"
-  [ -n "$why" ] || { sleep 1; sysctl -w debug.nvaccelfb=3 > /dev/null || why="debug.nvaccelfb=3 failed"; }
-  [ -n "$why" ] || { sleep 1; [ "$(sysctl -n debug.nvaccelfb)" = 1 ] || why="not armed (debug.nvaccelfb = $(sysctl -n debug.nvaccelfb), heads registered 0x$(printf %x "$(sysctl -n debug.nvaccel_heads_registered 2>/dev/null)"))"; }
+  # [gu605-mac] NOT debug.nvaccelfb=1/3 here: before the framebuffer's first open their made-up mode change panics
+  # (2026-11-13 18:28 boot: nvaccelfb_sysctl -> registerFramebufferLocked -> deliverModeChange -> IOGraphicsFamily, page
+  # fault). debug.nvaccel_prearm=1 only opens the scan-out gate and reads as armed; the family registers the
+  # framebuffer itself when WindowServer opens it.
+  [ -n "$why" ] || sysctl -w debug.nvaccel_prearm=1 > /dev/null || why="debug.nvaccel_prearm=1 failed"
+  [ -n "$why" ] || { [ "$(sysctl -n debug.nvaccelfb)" = 1 ] || why="not armed (debug.nvaccelfb = $(sysctl -n debug.nvaccelfb))"; }
   if [ -z "$why" ]; then
     if [ "$(conf WSMARK 1)" = 1 ]; then sysctl -w debug.nvaccel_surface_gpu_on=1 > /dev/null 2>&1 || say "no WindowServer marks in this XeGfxAccel"
     else sysctl -w debug.nvaccel_surface_gpu_on=0 > /dev/null 2>&1; fi
