@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
  */
 
+#include <objc/objc-sync.h>
 @interface NVMTLQueueReservation : NSObject { @public __weak NVMTLCommandBuffer *buffer; } @end
 @implementation NVMTLQueueReservation @end
 @interface NVMTLSubmissionPart : NSObject {
@@ -27,6 +28,40 @@
 @end
 static _Atomic unsigned gsub_inflight;
 static _Atomic unsigned long long gsub_ahead, gsub_peak;
+// <gu605> NVMTL_XE_AHEAD_UNLOCK: the submit-ahead pass lets go of the class lock for the vkQueueSubmit call itself.
+// nvmtl_ahead_busy (class lock) says one such call is running. While it is, nothing that decides order may go on: another
+// pass does nothing and asks the running one to go round again (nvmtl_ahead_again), the worker does not claim a part and
+// a command buffer does not start retiring its parts; each of them waits (nvmtl_ahead_busy_wait, never with the class
+// lock held) and then looks again under the lock. The pass keeps the lock from the end of one submit to the start of the
+// next, so a waiter gets in only when the whole pass is over, as it did when the pass never let go. What does get in
+// between: WindowServer's commits and its other short visits to the class lock.
+static BOOL nvmtl_ahead_busy, nvmtl_ahead_again;
+static _Atomic int nvmtl_ahead_busy_flag;   // nvmtl_ahead_busy for the sleepers, which do not hold the class lock
+static pthread_mutex_t nvmtl_ahead_busy_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t nvmtl_ahead_busy_cv = PTHREAD_COND_INITIALIZER;
+static _Atomic unsigned long long gAheadUnlocked;
+static void nvmtl_ahead_busy_wait(void) {
+    if (!atomic_load(&nvmtl_ahead_busy_flag)) return;
+    pthread_mutex_lock(&nvmtl_ahead_busy_mx);
+    while (atomic_load(&nvmtl_ahead_busy_flag)) pthread_cond_wait(&nvmtl_ahead_busy_cv, &nvmtl_ahead_busy_mx);
+    pthread_mutex_unlock(&nvmtl_ahead_busy_mx);
+}
+// the caller holds the class lock, and holds it again on return
+static int nvmtl_ahead_submit_begin(nvk_cmdbuf *commands, nvmtl_inflight *f) {
+    if (!nvmtl_xek(XEK_AHEAD_UNLOCK)) return nvmtl_vk_submit_begin(commands, f);
+    const Class cls = [NVMTLCommandBuffer class];
+    nvmtl_ahead_busy = YES; atomic_store(&nvmtl_ahead_busy_flag, 1);
+    objc_sync_exit(cls);
+    const int r = nvmtl_vk_submit_begin(commands, f);
+    objc_sync_enter(cls);
+    pthread_mutex_lock(&nvmtl_ahead_busy_mx);
+    nvmtl_ahead_busy = NO; atomic_store(&nvmtl_ahead_busy_flag, 0);
+    pthread_cond_broadcast(&nvmtl_ahead_busy_cv);
+    pthread_mutex_unlock(&nvmtl_ahead_busy_mx);
+    const unsigned long long n = atomic_fetch_add(&gAheadUnlocked, 1) + 1;
+    if (n == 1 || !(n & 0xFFFF)) nvlog("commit: %llu submit-ahead parts went to vkQueueSubmit without the class lock (NVMTL_XE_AHEAD_UNLOCK=1)", n);
+    return r;
+}
 static NSMutableArray *nvmtl_quarantined_parts;
 static int nvmtl_gsub_finish(NVMTLSubmissionPart *part) {
     nvmtl_inflight *const f = part->inflight;
@@ -44,6 +79,16 @@ static int nvmtl_gsub_finish(NVMTLSubmissionPart *part) {
 // Queue keys and command-buffer references are weak. An abandoned recording is
 // never registered; completion removes committed entries without retaining VRAM.
 static NSMapTable *nvmtl_surface_writers;
+// <gu605> The map has its own lock. It was under the class lock, which the submit-ahead pass holds for whole
+// vkQueueSubmit calls, and every render pass WindowServer opens on a surface asks here first: its main thread waited
+// 8% of a window drag in this check (2026-11-13). Order: class lock, then this one; never the other way round, so
+// nothing may be released for the last time inside it (a command buffer's dealloc can take the class lock): every
+// object loaded from a weak reference is parked in `keep`, which the caller lets go of after the lock.
+static id nvmtl_surface_writers_lock(void) {
+    static id token; static dispatch_once_t once;
+    dispatch_once(&once, ^{ token = [NSObject new]; });
+    return token;
+}
 // <wtl>
 // surface id and plane in one tagged NSNumber: no allocation on the per-bind path (it was a formatted string)
 static id nvmtl_surface_writer_key(NVMTLTexture *t) {
@@ -52,23 +97,30 @@ static id nvmtl_surface_writer_key(NVMTLTexture *t) {
 // </wtl>
 static BOOL nvmtl_surface_pending_write(NVMTLCommandBuffer *cb, NVMTLTexture *t) {
     if (!cb || !t || !t->_surf) return NO;
-    @synchronized ([NVMTLCommandBuffer class]) {
-        id key = nvmtl_surface_writer_key(t);   // <wtl>
-        for (id queue in nvmtl_surface_writers.keyEnumerator) {
+    NSMutableArray *keep = [NSMutableArray new];
+    BOOL pending = NO;
+    id key = nvmtl_surface_writer_key(t);   // <wtl>
+    const uint32_t seed = IOSurfaceGetSeed(t->_surf);
+    @synchronized (nvmtl_surface_writers_lock()) {
+        for (id queue in nvmtl_surface_writers.keyEnumerator.allObjects) {
+            [keep addObject:queue];
             NSDictionary *writes = [nvmtl_surface_writers objectForKey:queue];
             NVMTLPendingSurfaceWrite *write = writes[key];
             NVMTLCommandBuffer *writer = write ? write->buffer : nil;
             NVMTLTexture *backing = write ? write->texture : nil;
+            if (writer) [keep addObject:writer];
+            if (backing) [keep addObject:backing];
             const BOOL sameBacking = backing && (backing == t || (backing->_vramOn && t->_vramOn));
-            if (writer && writer != cb && sameBacking && write->seed == IOSurfaceGetSeed(t->_surf)) return YES;
+            if (writer && writer != cb && sameBacking && write->seed == seed) { pending = YES; break; }
         }
-        return NO;
     }
+    keep = nil;   // outside the lock
+    return pending;
 }
 static void nvmtl_surface_register_writes(NVMTLCommandBuffer *cb) {
     // The same lock as pending_write and finish_writes, taken here too: the map is shared with the completion thread, and
     // its one caller holding this (recursive) lock today must not be what keeps WindowServer's heap intact.
-    @synchronized ([NVMTLCommandBuffer class]) {
+    @synchronized (nvmtl_surface_writers_lock()) {
         if (!nvmtl_surface_writers) nvmtl_surface_writers = [NSMapTable weakToStrongObjectsMapTable];
         NSMutableDictionary *writes = [nvmtl_surface_writers objectForKey:cb->_queue];
         for (NVMTLSubmissionPart *part in cb->_parts) for (NVMTLTexture *t in part->surfaces) {
@@ -354,14 +406,18 @@ static void nvmtl_ws_mark_ready(NVMTLCommandBuffer *cb) {
 }
 static void nvmtl_surface_finish_writes(NVMTLCommandBuffer *cb) {
     nvmtl_ws_mark_ready(cb);
-    @synchronized ([NVMTLCommandBuffer class]) {
+    NSMutableArray *keep = [NSMutableArray new];
+    @synchronized (nvmtl_surface_writers_lock()) {
         NSMutableDictionary *writes = [nvmtl_surface_writers objectForKey:cb->_queue];
         for (id key in [writes.allKeys copy]) {   // <wtl>
             NVMTLPendingSurfaceWrite *write = writes[key];
-            if (!write->buffer || write->buffer == cb) [writes removeObjectForKey:key];
+            NVMTLCommandBuffer *writer = write->buffer;
+            if (writer) [keep addObject:writer];
+            if (!writer || writer == cb) { [keep addObject:write]; [writes removeObjectForKey:key]; }
         }
-        if (!writes.count) [nvmtl_surface_writers removeObjectForKey:cb->_queue];
+        if (!writes.count) { if (writes) [keep addObject:writes]; [nvmtl_surface_writers removeObjectForKey:cb->_queue]; }
     }
+    keep = nil;   // outside the lock
 }
 
 @implementation NVMTLSubmissionPart
@@ -517,7 +573,12 @@ static int nvmtl_skip_empty_on(void) {
     // <wtl>
     // The ahead pass can run on another thread (nvmtl_ahead_kick). Close the parts to it first, so it cannot submit a
     // part this loop has already passed: that part's fence and its in-flight slot would never come back.
-    @synchronized ([NVMTLCommandBuffer class]) { _partsRetiring = YES; }
+    // <gu605> not while a submit runs without the lock (NVMTL_XE_AHEAD_UNLOCK): it may be one of these parts, and its
+    // in-flight slot is written only when the call has returned
+    for (BOOL closed = NO; !closed; ) {
+        nvmtl_ahead_busy_wait();
+        @synchronized ([NVMTLCommandBuffer class]) { if (!nvmtl_ahead_busy) { _partsRetiring = YES; closed = YES; } }
+    }
     // </wtl>
     if (_scheduleAfterPublish) { _scheduleAfterPublish = NO; [self nvmtlMarkScheduled]; }
     for (NSUInteger i = _nextPart; i < _parts.count; i++) {
@@ -648,6 +709,7 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
 - (BOOL)nvmtlSubmitAhead {
     // a commit still putting its kernel marks in (nvmtlSubmitWithEvents) must not reach the GPU before them
     if (_executionDone || _partsRetiring || _cbError || !_committed || _commitMarking) return NO;   // <wtl>
+    if (nvmtl_ahead_busy) { nvmtl_ahead_again = YES; return NO; }   // <gu605> another pass is inside vkQueueSubmit
     if (_nextSubmit < _nextPart) _nextSubmit = _nextPart;
     while (_nextSubmit < _parts.count) {
         if (atomic_load(&gsub_inflight) >= nvmtl_gsub_cap()) return NO;
@@ -686,7 +748,7 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
         for (NVMTLBuffer *buffer in part->copyInputs) nvmtl_buffer_sync_submit(buffer);
         [self nvmtlMarkScheduled];
         if (!_legacyKernelStart) _legacyKernelStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
-        const int r = nvmtl_vk_submit_begin(&part->commands, f);
+        const int r = nvmtl_ahead_submit_begin(&part->commands, f);   // <gu605> may let go of the class lock for the call
         _nextSubmit++;
         if (r) {
             nvmtl_vk_inflight_free(f);
@@ -705,11 +767,16 @@ static void nvmtl_prepare_submission_copies(NVMTLSubmissionPart *part) {
 static void nvmtl_gsub_ahead_pass1(void);
 static void nvmtl_ahead_kick(void);
 static void nvmtl_gsub_ahead_pass(void) {
-    for (int round = 0; round < 64; round++) {
-        const unsigned long long before = atomic_load(&gEvFold);
-        nvmtl_gsub_ahead_pass1();
-        if (atomic_load(&gEvFold) == before) break;
-    }
+    // <gu605> a pass on another thread is inside vkQueueSubmit without the lock: it goes round once more instead
+    if (nvmtl_ahead_busy) { nvmtl_ahead_again = YES; return; }
+    do {
+        nvmtl_ahead_again = NO;
+        for (int round = 0; round < 64; round++) {
+            const unsigned long long before = atomic_load(&gEvFold);
+            nvmtl_gsub_ahead_pass1();
+            if (atomic_load(&gEvFold) == before) break;
+        }
+    } while (nvmtl_ahead_again);
 }
 static void nvmtl_gsub_ahead_pass1(void) {
     if (!nvmtl_xek(XEK_QUEUE_LEAP)) {
@@ -731,7 +798,7 @@ static void nvmtl_gsub_ahead_pass1(void) {
         return;
     }
     NSMutableSet *queues = [NSMutableSet new];
-    for (NVMTLCommandBuffer *cb in nvmtl_pending_buffers) {
+    for (NVMTLCommandBuffer *cb in [nvmtl_pending_buffers copy]) {   // <gu605> a copy: the list can change while a submit is out of the lock
         id q = cb->_queue;
         if (!q || [queues containsObject:q]) continue;
         [queues addObject:q];
@@ -747,8 +814,15 @@ static void nvmtl_gsub_ahead_pass1(void) {
     if (_cbError) { [self nvmtlFinishExecution:_cbError]; return YES; }
     if (_nextPart >= _parts.count) { [self nvmtlFinishExecution:nil]; return YES; }
     NVMTLSubmissionPart *part = _parts[_nextPart];
-    BOOL ahead;   // claimed under the class lock: the commit-time pass stops at a claimed part
-    @synchronized ([NVMTLCommandBuffer class]) { ahead = part->inflight || part->aheadFailed; part->claimed = YES; }
+    BOOL ahead = NO;   // claimed under the class lock: the commit-time pass stops at a claimed part
+    // <gu605> and not while a submit-ahead call runs without the lock (NVMTL_XE_AHEAD_UNLOCK): the pass that made it
+    // may be about to submit this very part, or one that must reach the GPU before it
+    for (BOOL claimed = NO; !claimed; ) {
+        nvmtl_ahead_busy_wait();
+        @synchronized ([NVMTLCommandBuffer class]) {
+            if (!nvmtl_ahead_busy) { ahead = part->inflight || part->aheadFailed; part->claimed = YES; claimed = YES; }
+        }
+    }
     if (part->waitEvent && !ahead && !part->waitFolded) {
         if (![part->waitEvent respondsToSelector:@selector(signaledValue)]) {
             [self nvmtlFinishExecution:[NSError errorWithDomain:MTLCommandBufferErrorDomain code:MTLCommandBufferErrorInternal

@@ -21,6 +21,12 @@ rm -rf "$O/src"; mkdir -p "$O/src"; cp -R "$R/plugin/." "$O/src/"
 grep -rl '/Library/GPUBundles/nvmtl/' "$O/src" | while read -r f; do sed -i '' 's#/Library/GPUBundles/nvmtl/#/Library/GPUBundles/xemtl/#g' "$f"; done
 left=$( (grep -rn '/Library/GPUBundles/nvmtl/' "$O/src" || true) | wc -l | tr -d ' ')   # grep finds none: exit 1 under pipefail
 [ "$left" = 0 ] || { echo "STOP: $left nvmtl paths left"; exit 6; }
+# The translated-shader cache in a process's own cache folder (WindowServer: .../C/WindowServer/nvmtl/spvcache) gets its
+# own name too. Both drivers swept that one folder for entries of "earlier drivers" at every start, which to each of them
+# is the other's whole cache: after a boot on the NVIDIA card the Intel desktop translated every CoreAnimation shader
+# again (2026-11-13: "dropped 337 entries / 57 MiB", then minutes of one core at 100% and 100 ms composite waits).
+sed -i '' 's#@"nvmtl/spvcache"#@"xemtl/spvcache"#g' "$O/src/NVMTLLibraryLoad.m"
+[ "$(grep -c '@"xemtl/spvcache"' "$O/src/NVMTLLibraryLoad.m")" = 2 ] || { echo "STOP: spvcache folder names not rewritten"; exit 6; }
 cd "$O/src"
 xcrun clang -arch x86_64 -bundle -fobjc-arc -O1 $RDEF -DNVMTL_ALLOW_LIST='"/Library/GPUBundles/xemtl-allow.txt"' \
   -Wno-protocol -Wno-incomplete-implementation -mmacosx-version-min=15.0 -I"$DEPS/Vulkan-Headers/include" \
