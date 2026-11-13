@@ -155,7 +155,7 @@ index b52204d..fbf6392 100644
  
  typedef UInt8  u8;
 diff --git a/itlwm/hal_iwx/ItlIwx.cpp b/itlwm/hal_iwx/ItlIwx.cpp
-index f80e5cb..79271ef 100644
+index f80e5cb..35c2ef5 100644
 --- a/itlwm/hal_iwx/ItlIwx.cpp
 +++ b/itlwm/hal_iwx/ItlIwx.cpp
 @@ -142,6 +142,9 @@ int iwx_debug = 1;
@@ -475,7 +475,7 @@ index f80e5cb..79271ef 100644
 +    if (isset(sc->sc_enabled_capa, IWX_UCODE_TLV_CAPA_BAID_ML_SUPPORT) &&
 +        sc->sc_use_mld_api) {
 +        iwx_mld_sta_rx_agg(sc, ni, tid, ssn, winsize, timeout_val, start);
-+        return;
++        return generation != sc->sc_generation ? ENXIO : 0;   /* (this tree's iwx_sta_rx_agg returns int) */
 +    }
 +    
      s = splnet();
@@ -739,7 +739,7 @@ index f80e5cb..79271ef 100644
      }
  
      sc->sc_rx_ba_sessions = 0;
-@@ -7674,129 +7981,837 @@ iwx_rm_sta(struct iwx_softc *sc, struct iwx_node *in)
+@@ -7674,130 +7981,838 @@ iwx_rm_sta(struct iwx_softc *sc, struct iwx_node *in)
              continue;
          ieee80211_delba_request(ic, ni, 0, 1, i);
      }
@@ -1011,6 +1011,7 @@ index f80e5cb..79271ef 100644
 -            return ENOBUFS;
 -    } else if (remain < 2 + rs->rs_nrates)
 -        return ENOBUFS;
+-    preq->band_data[0].offset = htole16(frm - (uint8_t *)wh);
 +    err = iwx_send_cmd_pdu(sc,
 +                           IWX_WIDE_ID(IWX_MAC_CONF_GROUP, IWX_MAC_CONFIG_CMD),
 +                           0, sizeof(cmd), &cmd);
@@ -1673,9 +1674,10 @@ index f80e5cb..79271ef 100644
 +            return ENOBUFS;
 +    } else if (remain < 2 + rs->rs_nrates)
 +        return ENOBUFS;
-     preq->band_data[0].offset = htole16(frm - (uint8_t *)wh);
++    preq->band_data[0].offset = htole16(frm - (uint8_t *)wh);
      pos = frm;
      frm = ieee80211_add_rates(frm, rs);
+     if (rs->rs_nrates > IEEE80211_RATE_SIZE)
 @@ -7878,11 +8893,23 @@ iwx_config_umac_scan(struct iwx_softc *sc)
      scan_config->tx_chains = htole32(iwx_fw_valid_tx_ant(sc));
      scan_config->rx_chains = htole32(iwx_fw_valid_rx_ant(sc));
@@ -2767,7 +2769,7 @@ index 8360ff1..584f8fa 100644
      uint8_t    iwx_ridx2rate(struct ieee80211_rateset *, int);
      int    iwx_rval2ridx(int);
 diff --git a/itlwm/hal_iwx/if_iwxreg.h b/itlwm/hal_iwx/if_iwxreg.h
-index 93187fe..d2ad5b1 100644
+index 93187fe..9faa742 100644
 --- a/itlwm/hal_iwx/if_iwxreg.h
 +++ b/itlwm/hal_iwx/if_iwxreg.h
 @@ -1414,7 +1414,7 @@ enum iwx_msix_ivar_for_cause {
@@ -2779,7 +2781,7 @@ index 93187fe..d2ad5b1 100644
  
  /*
   * For 16.0 uCode and above, there is no differentiation between sections,
-@@ -8134,3 +8134,514 @@ do {   \
+@@ -8134,3 +8134,509 @@ do {   \
  #define IWX_BARRIER_READ_WRITE(sc)                    \
      bus_space_barrier((sc)->sc_st, (sc)->sc_sh, 0, (sc)->sc_sz,    \
          BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE)
@@ -2982,12 +2984,7 @@ index 93187fe..d2ad5b1 100644
 +	};
 +} __packed; /* MAC_CONTEXT_CONFIG_CMD_API_S_VER_2 */
 +
-+struct iwx_he_backoff_conf {
-+	uint16_t cwmin;
-+	uint16_t cwmax;
-+	uint16_t aifsn;
-+	uint16_t mu_time;
-+} __packed; /* AC_QOS_DOT11AX_API_S */
++/* struct iwx_he_backoff_conf (AC_QOS_DOT11AX_API_S): defined above with the HE station context */
 +
 +enum iwx_link_ctx_modify_flags {
 +	IWX_LINK_CONTEXT_MODIFY_ACTIVE		= (1 << 0),
