@@ -105,6 +105,14 @@ if [ "$BR" = armed ] && [ "$LEVEL" = desktop ]; then
   else pend 0; say "boot run armed the accelerator, but WindowServer is not compositing on it (it started before the arming): the usual path from here"; fi
 fi
 if [ "$BOOTWS" = 0 ]; then
+# [gu605-mac] 2026-11-13 11:54: this runner was a second ahead of XeGfxIntelFB (start "begin" above); stage 4 took the
+# display while the kext was still reading EDID and DPCD over AUX A, its start then took 25 s instead of 0.5 s, the
+# stages failed and WindowServer came up on an accelerator that was never armed (verbose screen for good). Nothing is
+# started before the framebuffer's own start has ended.
+fbst() { ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | sed -nE 's/.*"XeGfxIntelFB-Start" = "([^"]*)".*/\1/p' | head -1; }
+w=0; while [ "$(fbst)" != started ] && [ $w -lt 40 ]; do sleep 1; w=$((w+1)); done
+[ $w -gt 0 ] && say "waited $w s for XeGfxIntelFB's start to end (now: $(fbst))"
+[ "$(fbst)" = started ] || finish "XeGfxIntelFB's start did not end within 40 s (state: $(fbst)): nothing started"
 # stages 1-2 are read-only; from 3 on a hang is possible, so the pending mark goes first
 bash "$G/gu605-stages.sh" 2 "$R/stages" || finish "stages 1-2 failed (see stages/)"
 { echo "== display as the firmware left it (stage 2)"; cat "$R/stages/display-decoded.txt" 2>/dev/null; } >> "$S"
