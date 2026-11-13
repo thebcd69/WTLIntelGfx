@@ -7,7 +7,7 @@ name: airportitlwm-iolog
 on:
   push:
     branches: [gu605-mac]
-    paths: ['.github/workflows/airportitlwm-iolog.yml']
+    paths: ['.github/workflows/airportitlwm-iolog.yml', 'gu605/tools/itlwm-ringlog.py']
   workflow_dispatch:
     inputs:
       ref:
@@ -31,20 +31,18 @@ jobs:
           repository: acidanthera/MacKernelSDK
           ref: 3f750085caa17ec3a7880f11c11bf4f48cd6a164
           path: itlwm/MacKernelSDK
-      - name: Log through IOLog
+      - name: Log into a buffer inside the kext (sysctl debug.itlwm_log)
         run: |
           set -euo pipefail
-          cd itlwm
-          perl -0pi -e 's/kprintf\("%s: " fmt, "itlwm", ##x\);/IOLog("%s: " fmt, "itlwm", ##x);/' itl80211/linux/types.h
-          grep -n 'IOLog("%s: " fmt, "itlwm"' itl80211/linux/types.h
-          grep -rn 'kprintf' --include=*.h --include=*.hpp --include=*.cpp --include=*.c . | grep -v MacKernelSDK | head -20 || true
+          python3 gu605/tools/itlwm-ringlog.py itlwm
+          grep -n 'itlwm_ringlog' itlwm/itl80211/linux/types.h itlwm/AirportItlwm/IOPCIEDeviceWrapper.cpp | head
       - name: Build AirportItlwm-Sequoia
         run: |
           set -euo pipefail
           cd itlwm
           xcodebuild -project itlwm.xcodeproj -scheme AirportItlwm-Sequoia -configuration Debug -jobs 3 ARCHS=x86_64 \
             SYMROOT="$PWD/build/products" OBJROOT="$PWD/build/obj" CODE_SIGNING_ALLOWED=NO \
-            GIT_COMMIT="_$(git rev-parse --short HEAD)-iolog" build > ../build.log 2>&1 || { tail -80 ../build.log; exit 1; }
+            GIT_COMMIT="_$(git rev-parse --short HEAD)-ringlog" build > ../build.log 2>&1 || { tail -80 ../build.log; exit 1; }
           K=$(find build/products -name AirportItlwm.kext -maxdepth 3 | head -1); echo "$K"
           mkdir -p ../out && ditto -c -k --keepParent "$K" ../out/AirportItlwm-Sequoia-iolog.zip
           (cd ../out && shasum -a 256 AirportItlwm-Sequoia-iolog.zip > SHA256SUMS && cat SHA256SUMS)
