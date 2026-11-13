@@ -3,19 +3,17 @@
 # no tree carries ("iwlwifi-ma-a0-gf-a0-63.ucode resource load fail", read from the driver's own log on 2026-11-13).
 # The owner's itlwm port (thebcd69/itlwm branch mtl, ac15a19: -89 firmware, fragmented PNVM, MLD firmware API) works
 # on this hardware with HeliPort. gu605/wifi/airportitlwm-mtl.patch is that branch merged into laobamac 7204c69
-# (conflicts resolved by hand, see the patch's ItlIwx.cpp hunks marked MTL). The two firmware images come from
-# linux-firmware and must be byte-identical to the ones inside the owner's working itlwm.kext.
+# (conflicts resolved by hand, see the patch's ItlIwx.cpp hunks marked MTL). The two firmware images are the ones
+# inside the owner's working itlwm.kext (gu605/wifi/firmware, sha256 below).
 # Publishes prerelease airportitlwm-mtl-<sha>. Runs on a push that changes this file or the patch.
 name: airportitlwm-mtl
 on:
   push:
     branches: [gu605-mac]
-    paths: ['.github/workflows/airportitlwm-mtl.yml', 'gu605/wifi/airportitlwm-mtl.patch']
+    paths: ['.github/workflows/airportitlwm-mtl.yml', 'gu605/wifi/**']
 permissions:
   contents: write
 env:
-  LF: https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
-  LF2: https://gitlab.com/kernel-firmware/linux-firmware/-/raw/main
   UCODE_SHA: 83c358a33c66bd41f753ee8e0e4fff5c9741694a397ac13a61e851e6bcf5dd6b
   PNVM_SHA: 65ccc7ed05c0ecb3ea0374b607ecacfdc693df4e5cbf825a4c91f71ce8fa9b7b
 jobs:
@@ -39,21 +37,18 @@ jobs:
           set -euo pipefail
           git -C itlwm apply --index ../gu605/wifi/airportitlwm-mtl.patch
           git -C itlwm diff --cached --stat | tail -12
-      - name: Firmware (linux-firmware, checked against the images of the working itlwm.kext)
+      - name: Firmware (the two images of the working itlwm.kext, kept in gu605/wifi/firmware)
         run: |
           set -euo pipefail
-          cd itlwm/itlwm/firmware
-          get() {   # name, sha256
-            for u in "$LF/$1" "$LF/intel/iwlwifi/$1" "$LF2/$1" "$LF2/intel/iwlwifi/$1"; do
-              if curl -fsSL --retry 3 -o "$1" "$u" && [ "$(shasum -a 256 "$1" | cut -d' ' -f1)" = "$2" ]; then echo "$1 <- $u"; return 0; fi
-              [ -f "$1" ] && echo "not it: $u ($(stat -f%z "$1") bytes, $(shasum -a 256 "$1" | cut -c1-16))"
-            done
-            echo "no source has $1 with sha256 $2"; return 1
-          }
-          get iwlwifi-ma-b0-gf-a0-89.ucode "$UCODE_SHA"
-          get iwlwifi-ma-b0-gf-a0.pnvm "$PNVM_SHA"
-          rm -f ../../include/FwBinary.cpp
-          ls -la | grep -i ma-
+          # linux-firmware's -89 file changed after the port was tested (2026-11-13: 1753076 bytes there, 1752976 in the
+          # owner's working kext), so the images proven on this hardware are kept in the repository (Intel's licence
+          # beside them) and checked here
+          cd gu605/wifi/firmware
+          echo "$UCODE_SHA  iwlwifi-ma-b0-gf-a0-89.ucode" | shasum -a 256 -c
+          echo "$PNVM_SHA  iwlwifi-ma-b0-gf-a0.pnvm" | shasum -a 256 -c
+          cp iwlwifi-ma-b0-gf-a0-89.ucode iwlwifi-ma-b0-gf-a0.pnvm "$GITHUB_WORKSPACE/itlwm/itlwm/firmware/"
+          rm -f "$GITHUB_WORKSPACE/itlwm/include/FwBinary.cpp"
+          ls -la "$GITHUB_WORKSPACE/itlwm/itlwm/firmware/" | grep -i ma-
       - name: Firmware TLV dump
         run: python3 -I itlwm/scripts/iwx_fw_info.py itlwm/itlwm/firmware/iwlwifi-ma-b0-gf-a0-89.ucode itlwm/itlwm/firmware/iwlwifi-ma-b0-gf-a0.pnvm | head -60
       - name: Build AirportItlwm-Sequoia
