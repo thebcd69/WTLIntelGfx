@@ -166,6 +166,7 @@ xg_kms_bootfb(struct drm_device *dev)
 #define XG_BIG_H	2560u
 #define XG_BIG_FBS	8
 extern unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
+unsigned long long xg_console_phys(void);	/* xg_kext.cpp: the firmware console's physical address, 0 if unknown */
 static struct drm_i915_gem_object *xg_big_obj;
 static unsigned long long xg_big_phys;
 static unsigned long xg_big_size;
@@ -216,32 +217,34 @@ xg_kms_big_obj(struct drm_i915_private *i915)
 		return (-ENODEV);
 	}
 	/*
-	 * Where stolen offset 0 is in physical memory. Not from a register alone (a wrong answer here would hand macOS
-	 * someone else's memory as its framebuffer): from the firmware's image, whose physical address came out of its GGTT
-	 * entry at stage 2 (xg_boot_fb_phys) and whose place in stolen memory i915 recorded when it took the image over.
-	 * The firmware's own word for the base (DSMBASE, or BDSM in the device's configuration space, the one Linux's early
-	 * quirk reads on this platform) is the cross-check: one of the two has to agree, or there are no HiDPI desktops.
+	 * Where stolen offset 0 is in physical memory. DSMBASE says it, but one register is not enough (a wrong answer
+	 * here would hand macOS someone else's memory as its framebuffer), so two things have to agree with it:
+	 *  - the firmware's image is where i915 thinks it is: its GGTT entry, read at stage 2 (xg_boot_fb_phys), is the
+	 *    image's stolen offset counted from the region's start (MTL writes GSM-relative addresses there, the region
+	 *    starts 8 MiB in: measured 0x800000 with the image at stolen 0) or from DSMBASE itself;
+	 *  - the address the firmware gave macOS for that same image (the console: PE_Video, what the picture has been
+	 *    drawn through since the first boot) is DSMBASE plus that offset.
+	 * WAS (15c55a4): DSMBASE had to equal xg_boot_fb_phys minus the offset, which never holds on this machine
+	 * (0x50800000 against 0x800000), so no HiDPI desktop was ever offered.
 	 */
 	{
 		struct drm_gem_object *bg = xg_kms_fb != NULL ? intel_fb_bo(xg_kms_fb) : NULL;
 		struct drm_i915_gem_object *bo = bg != NULL ? to_intel_bo(bg) : NULL;
-		u64 reg = intel_uncore_read64(&i915->uncore, GEN6_DSMBASE) & GEN11_BDSM_MASK, cfg;
-		u32 lo = 0, hi = 0;
+		u64 reg = intel_uncore_read64(&i915->uncore, GEN6_DSMBASE) & GEN11_BDSM_MASK;
+		u64 cons = xg_console_phys() & ~0xfffull, boff = ~0ull;
+		bool pte = false;
 
-		pci_read_config_dword(to_pci_dev(i915->drm.dev), 0xc0, &lo);	/* INTEL_GEN11_BSM_DW0/DW1 */
-		pci_read_config_dword(to_pci_dev(i915->drm.dev), 0xc4, &hi);
-		cfg = (((u64)hi << 32) | lo) & GEN11_BDSM_MASK;
-		if (cfg == GEN11_BDSM_MASK)
-			cfg = 0;
-
-		dsm = 0;
-		if (bo != NULL && bo->stolen != NULL && xg_boot_fb_phys != 0 && xg_boot_fb_phys >= bo->stolen->start)
-			dsm = xg_boot_fb_phys - bo->stolen->start;
-		if (dsm == 0 || (dsm & 0xfffff) != 0 || (reg != dsm && cfg != dsm)) {
+		if (bo != NULL && bo->stolen != NULL) {
+			boff = bo->stolen->start;
+			pte = xg_boot_fb_phys != 0 && (xg_boot_fb_phys == i915->dsm.stolen.start + boff ||
+			    xg_boot_fb_phys == reg + boff);
+		}
+		dsm = reg;
+		if (reg == 0 || (reg & 0xfffff) != 0 || !pte || cons == 0 || cons != reg + boff) {
 			snprintf(xg_big_why, sizeof(xg_big_why),
-			    "stolen base not certain (boot image 0x%llx at stolen 0x%llx, DSMBASE 0x%llx, BDSM 0x%llx)",
-			    xg_boot_fb_phys, bo != NULL && bo->stolen != NULL ? (unsigned long long)bo->stolen->start : ~0ull,
-			    (unsigned long long)reg, (unsigned long long)cfg);
+			    "stolen base not certain (DSMBASE 0x%llx, region start 0x%llx, boot image: GGTT entry 0x%llx, stolen "
+			    "0x%llx, console 0x%llx)", (unsigned long long)reg, (unsigned long long)i915->dsm.stolen.start,
+			    xg_boot_fb_phys, (unsigned long long)boff, (unsigned long long)cons);
 			i915_gem_object_put(obj);
 			return (-ENXIO);
 		}
@@ -249,8 +252,8 @@ xg_kms_big_obj(struct drm_i915_private *i915)
 	xg_big_phys = dsm + obj->stolen->start;
 	xg_big_size = size;
 	xg_big_obj = obj;	/* the reference is kept for good */
-	snprintf(xg_big_why, sizeof(xg_big_why), "%ux%u at stolen 0x%llx, physical 0x%llx (DSM 0x%llx, boot image 0x%llx)",
-	    XG_BIG_W, XG_BIG_H, (unsigned long long)obj->stolen->start, xg_big_phys, (unsigned long long)dsm, xg_boot_fb_phys);
+	snprintf(xg_big_why, sizeof(xg_big_why), "%ux%u at stolen 0x%llx, physical 0x%llx (DSM 0x%llx, console 0x%llx)",
+	    XG_BIG_W, XG_BIG_H, (unsigned long long)obj->stolen->start, xg_big_phys, (unsigned long long)dsm, xg_console_phys());
 	drm_info(&i915->drm, "xegfx: HiDPI framebuffer: %s\n", xg_big_why);
 	return (0);
 }

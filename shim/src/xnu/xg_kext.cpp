@@ -10,6 +10,7 @@
  */
 #include <IOKit/IOLib.h>
 #include <IOKit/IOService.h>
+#include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IONVRAM.h>
 #include <IOKit/pci/IOPCIDevice.h>
 #include <architecture/i386/pio.h>
@@ -76,6 +77,17 @@ extern unsigned long long xg_spin_max_us;
 extern unsigned int xg_spin_long;
 /* the firmware's console image, when pipe A scans it out at probe; i915's stolen allocator starts after it */
 unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
+/* the physical address the firmware gave macOS for its console image (boot-args video), 0 if there is none */
+extern "C" unsigned long long
+xg_console_phys(void)
+{
+	PE_Video v;
+
+	bzero(&v, sizeof(v));
+	if (IOService::getPlatform() == NULL || IOService::getPlatform()->getConsoleInfo(&v) != kIOReturnSuccess)
+		return (0);
+	return ((unsigned long long)v.v_baseAddr);
+}
 /*
  * GU605 branch, display path (docs/GU605-DISPLAY-DESIGN.md): -1 not a GU605 (the overlay keeps its tunables), 0 GU605
  * with i915's display code off (the adopt path), 1 GU605 with i915 owning the display (KMS). Set before stage 4 and
