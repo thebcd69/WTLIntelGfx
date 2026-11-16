@@ -533,8 +533,10 @@ xg_kms_set2(const char *name, unsigned int w, unsigned int h, unsigned int mhz, 
 	struct drm_device *dev;
 	struct intel_encoder *enc;
 	unsigned int bd = ~0u, d, joined = 0;
+	const int tj = test ? xg_kms_test_join : 0;	/* one request only: the next check is i915's own choice again */
 	int ret;
 
+	xg_kms_test_join = 0;
 	if (msglen)
 		msg[0] = 0;
 	if (i915 == NULL) {
@@ -749,8 +751,8 @@ retry:
 		const int join0 = ic->force_joined_pipes;
 
 		joined = 0;
-		if (test && xg_kms_test_join > 0)
-			ic->force_joined_pipes = xg_kms_test_join;
+		if (tj > 0)
+			ic->force_joined_pipes = tj;
 		ret = test ? drm_atomic_check_only(state) : drm_atomic_commit(state);
 		if (ret == 0 && test)
 			joined = to_intel_crtc_state(crtc_state)->joiner_pipes;
@@ -773,7 +775,7 @@ out:
 	else if (msglen && msg[0] == 0)
 		snprintf(msg, msglen, "%s %s %ux%u %u.%03u Hz%s: error %d", test ? "test" : "commit", name, mode.hdisplay,
 		    mode.vdisplay, xg_mode_mhz(&mode) / 1000, xg_mode_mhz(&mode) % 1000,
-		    test && xg_kms_test_join > 0 ? " joined" : "", ret);
+		    tj > 0 ? " joined" : "", ret);
 	drm_atomic_state_put(state);
 	drm_modeset_drop_locks(&ctx);
 	drm_modeset_acquire_fini(&ctx);
