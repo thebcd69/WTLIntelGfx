@@ -53,3 +53,6 @@ NO_IDLE_SLEEP=1
 # Standard hybrid (nvram xeintelfb-hybrid=1: WindowServer on the NVIDIA GPU, picture through the Intel GPU's displays):
 # 1 = when this framebuffer missed NVRM's arming and was registered late, restart WindowServer once (ends the session)
 HYBRID_WSRESTART=0
+# GHelperMac GPU modes: in the Standard boot between Ultimate and Eco, arm Eco and restart by itself (flag file
+# /Users/Shared/GHelperMac/gpu-next, written by the app; needs tools/ghelperctl). 0 = never restart from here.
+GPU_NEXT=1

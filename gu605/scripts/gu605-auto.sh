@@ -68,6 +68,26 @@ for i in $(seq 1 30); do [ "$(igpu_fb_present)" = 1 ] || [ "$(nvidia_live)" = 1 
 [ "$i" -gt 1 ] && say "waited $(( (i - 1) * 2 )) s for a framebuffer driver (XeGfxIntelFramebuffer $(igpu_fb_present), NVRM live $(nvidia_live))"
 MODE=$(gpu_mode)
 say "mode: $MODE (XeGfxIntelFramebuffer $(igpu_fb_present), iGPU drives the panel $(igpu_drives_panel), NVRM live $(nvidia_live), NVIDIA PCI node $(pci_display_present 10de))"
+# [ghelper] Ultimate -> Eco takes two boots (the firmware moves the MUX first, as on Windows): GHelperMac leaves
+# "eco <epoch>" in /Users/Shared/GHelperMac/gpu-next, and this Standard boot in between only exists to move on. Arm Eco
+# in ASUSATKD (written by its restart hook) and restart, once: the flag is moved away first. gu605.conf GPU_NEXT=0: off.
+GN=/Users/Shared/GHelperMac/gpu-next
+if [ -s "$GN" ] && [ -x "$G/tools/ghelperctl" ] && [ "$(conf GPU_NEXT 1)" = 1 ]; then
+  gn=$(head -1 "$GN"); gst=$("$G/tools/ghelperctl" gpu status 2>&1 | tail -1)
+  mv -f "$GN" "$R/gpu-next.taken"; fullsync "$R"
+  age=$(( $(date +%s) - $(echo "$gn" | awk '{print $2 + 0}') ))
+  case "$gn $gst" in
+    "eco "*" mode=standard "*)
+      if [ "$age" -ge 0 ] && [ "$age" -lt 3600 ]; then
+        ga=$("$G/tools/ghelperctl" gpu eco 2>&1 | head -1)
+        case "$ga" in
+          "armed=eco plan=0x1") say "gpu-next: Eco asked $age s ago, this is the Standard boot in between: $ga, restarting now"; cp "$S" "$L/last-summary.txt"; sync; /sbin/shutdown -r now; exit 0 ;;
+          *) say "gpu-next: Eco could not be armed ($ga): staying in Standard" ;;
+        esac
+      else say "gpu-next: flag is $age s old, ignored"; fi ;;
+    *) say "gpu-next: flag '$gn' does not fit this boot ($gst): ignored" ;;
+  esac
+fi
 # [gu605-mac] the kernel log is read in the background: each `log show --last boot` took 20-45 s on this machine and the
 # two of them delayed the whole run (2026-11-10 15:59: 45 s before stage 1). The ioreg line is enough to decide here.
 say "XeGfxIntelFB start: $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | awk -F'= ' '/"XeGfxIntelFB-Start"/ {print $2; exit}') (kernel lines: boot-state.txt)"
