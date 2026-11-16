@@ -39,11 +39,17 @@
         setProperty("XeGfxKmsConnectFired", (unsigned long long)fConnFired, 32);
     }
     static uint32_t kmsHz16(const XifbKmsMode &m) { return (uint32_t)(((uint64_t)m.mhz << 16) / 1000); }
+    // [gu605-mac] the panel's low rate is its 240 Hz timing with the vertical blanking stretched (2560x1600 "60 Hz":
+    // clock 1125275 kHz, vtotal 7104 for 1600 lines). Set as a fixed mode it shows garbage: the pointer on the left half
+    // only, wrong colours, the picture coming and going (owner, 2026-11-16 15:55, the Eco boot after WindowServer took
+    // "1280 x 800 HiDPI 60 Hz"). Such a mode is not offered on the panel, plain or under a HiDPI desktop.
+    static bool kmsStretched(const XifbKmsMode &m) { return m.vtotal > m.h * 2; }
     // which of fKm are offered: internal -> the boot raster at other rates; external -> what fits the boot framebuffer
     void kmsOffer() {
         for (int i = 0; i < fKmN; i++) {
             const XifbKmsMode &m = fKm[i];
             bool ok = !(m.flags & 0x10) && m.mhz;   // DRM_MODE_FLAG_INTERLACE
+            if (ok && !fExternal && kmsStretched(m)) ok = false;
             if (ok && !fExternal) {
                 const uint32_t hz = kmsHz16(m), d = hz > fBootHz16 ? hz - fBootHz16 : fBootHz16 - hz;
                 ok = m.w == fBootW && m.h == fBootH && d > (3u << 15);   // not the firmware's rate (1.5 Hz)
@@ -116,6 +122,7 @@
         for (int i = 0; i < fKmN; i++) {
             const XifbKmsMode &m = fKm[i];
             if (m.w != n->w || m.h != n->h || (m.flags & 0x10) || !m.mhz) continue;
+            if (!fExternal && kmsStretched(m)) continue;
             const uint32_t d60 = m.mhz > 60000 ? m.mhz - 60000 : 60000 - m.mhz, d120 = m.mhz > 120000 ? m.mhz - 120000 : 120000 - m.mhz;
             if (d60 < 2500 && (!r60 || d60 < (r60->mhz > 60000 ? r60->mhz - 60000 : 60000 - r60->mhz))) r60 = &m;
             if (d120 < 2500 && (!r120 || d120 < (r120->mhz > 120000 ? r120->mhz - 120000 : 120000 - r120->mhz))) r120 = &m;

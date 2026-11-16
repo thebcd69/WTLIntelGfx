@@ -146,7 +146,15 @@ static int xf_pipe_find(volatile xf_u8 *bar, xf_u32 w, xf_u32 h, xf_u32 pitch)
 			off2 = xf_rd(bar, XF_PLANE_OFFSET(p + 1));
 			if (!(ctl2 & 0x80000000u) || (xf_rd(bar, XF_TRANSCONF(p + 1)) & 0x80000000u))
 				continue;
-			if ((size2 & 0xffffu) + 1 != w - pw || ((size2 >> 16) & 0xffffu) + 1 != h || (off2 & 0xffffu) != pw)
+			/*
+			 * [gu605-mac] where the second plane starts reading: i915 folds whole pages of the x offset into
+			 * PLANE_SURF and leaves the rest in PLANE_OFFSET (measured 2026-11-16, 4096 wide: PLANE_OFFSET_1B 0,
+			 * PLANE_SURF_1B = PLANE_SURF_1A + 0x2000; a 3200 wide desktop gives + 0x1000 and x 576). WAS: only
+			 * PLANE_OFFSET's x == pw, which never held, so every joined frame was copied.
+			 */
+			if ((size2 & 0xffffu) + 1 != w - pw || ((size2 >> 16) & 0xffffu) + 1 != h || (off2 >> 16) != 0 ||
+			    ((xf_rd(bar, XF_PLANE_SURF(p + 1)) & ~0xfffu) - (xf_rd(bar, XF_PLANE_SURF(p)) & ~0xfffu)) +
+			    (off2 & 0xffffu) * 4u != pw * 4u)
 				continue;
 			if ((xf_rd(bar, XF_PLANE_OFFSET(p)) & 0xffffu) != 0)
 				continue;
