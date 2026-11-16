@@ -387,15 +387,25 @@ class XeGfxIntelFramebuffer : public IONDRVFramebuffer {
         wr(XIFB_CUR_SAGV, (1u << 31) | (6u << 14) | 16u);
         fCurDdb = true;
     }
-    void curRegs(SInt32 x, SInt32 y, bool on) {
+    // [gu605-mac] two joined pipes (kms.inc, HiDPI at 240 Hz): the picture's left fCurHalf panel pixels are pipe A's, the
+    // rest pipe B's, and each has a cursor plane of its own in its own coordinates. Both show the same image; the
+    // one the pointer is not over (or only reaches into from the other side by less than nothing) is off.
+    uint32_t fCurHalf = 0;
+    void curRegs1(uint32_t po, SInt32 x, SInt32 y, bool on) {
         uint32_t pos = (x < 0 ? (1u << 15) | (uint32_t)(-x & 0xfff) : (uint32_t)(x & 0xfff)) |
                        (y < 0 ? (1u << 31) | ((uint32_t)(-y & 0xfff) << 16) : ((uint32_t)(y & 0xfff) << 16));
         // [gu605-mac] never without the level-0 watermark: i915's commits (display path) write the cursor's watermarks
         // as off, and a cursor plane fetching without one underruns the pipe; kmsCursorArm writes them again
-        if (on && !(rd(XIFB_CUR_WM0) & (1u << 31))) on = false;
-        wr(XIFB_CUR_POS, pos);
-        wr(XIFB_CUR_CTL, on ? (1u << 14) | 0x23u : 0);  // trickle feed off, 256x256 ARGB (0x27 is 64x64)
-        wr(XIFB_CUR_BASE, XIFB_CUR_GGTT);                // arms CTL, POS, WM and BUF_CFG
+        if (on && !(rd(XIFB_CUR_WM0 + po) & (1u << 31))) on = false;
+        wr(XIFB_CUR_POS + po, pos);
+        wr(XIFB_CUR_CTL + po, on ? (1u << 14) | 0x23u : 0);  // trickle feed off, 256x256 ARGB (0x27 is 64x64)
+        wr(XIFB_CUR_BASE + po, XIFB_CUR_GGTT);                // arms CTL, POS, WM and BUF_CFG
+    }
+    void curRegs(SInt32 x, SInt32 y, bool on) {
+        if (!fCurHalf) { curRegs1(0, x, y, on); return; }
+        const SInt32 h = (SInt32)fCurHalf, xb = x - h;
+        curRegs1(0, x < h ? x : h - 1, y, on && x < h);
+        curRegs1(0x1000, xb > -(SInt32)XIFB_CUR_DIM ? xb : -(SInt32)XIFB_CUR_DIM + 1, y, on && xb > -(SInt32)XIFB_CUR_DIM);
     }
     SInt32 fCurX = 0, fCurY = 0; bool fCurVis = false, fCurImg = false;
 public:

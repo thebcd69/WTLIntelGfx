@@ -67,7 +67,7 @@
     // cursor plane is not scaled with the desktop.
     static constexpr IODisplayModeID kHiBase = 0x40000;
     static constexpr int kHiMax = 12;
-    struct XifbHi { uint32_t dw, dh; XifbKmsMode rm; };
+    struct XifbHi { uint32_t dw, dh; XifbKmsMode rm; uint32_t join; };   // join: 2 = i915 splits the picture over two pipes for it
     XifbHi fHi[kHiMax]; int fHiN = 0;
     uint64_t fBig[4] = {};   // physical address, bytes, largest desktop w, h (0: XeGfx has none)
     const XifbHi *kmsHi(IODisplayModeID id) const {
@@ -77,13 +77,14 @@
     }
     bool kmsHiNow() const { return fCurId >= kHiBase && fCurId < kHiBase + (kHiMax << 8); }
     bool kmsHiCommit(const XifbHi &hm, bool test) {
-        uint32_t v[6] = { hm.rm.w, hm.rm.h, hm.rm.mhz, test ? 1u : 0u, hm.dw, hm.dh }; char msg[128] = {};
+        uint32_t v[6] = { hm.rm.w, hm.rm.h, hm.rm.mhz, (test ? 1u : 0u) | (hm.join << 8), hm.dw, hm.dh }; char msg[128] = {};
         if (test) return xifbKmsCall(7, (void *)fConnName, v, msg);
         OSIncrementAtomic(&fKmsBusy);
         kmsCursorPark();
         const bool ok = xifbKmsCall(7, (void *)fConnName, v, msg);
-        XIFBLOG("display path: %s desktop %ux%u on %ux%u %u mHz -> %s (%s)", fConnName, hm.dw, hm.dh, hm.rm.w, hm.rm.h, hm.rm.mhz,
-                ok ? "committed" : "REFUSED", msg);
+        XIFBLOG("display path: %s desktop %ux%u on %ux%u %u mHz%s -> %s (%s)", fConnName, hm.dw, hm.dh, hm.rm.w, hm.rm.h, hm.rm.mhz,
+                hm.join ? ", two pipes" : "", ok ? "committed" : "REFUSED", msg);
+        if (ok) fCurHalf = hm.join == 2 ? hm.rm.w / 2 : 0;
         // WAS (v10): no hardware cursor on a scaled desktop, WindowServer drew the pointer and it moved in steps
         // (owner, 2026-11-16). Now the image and the positions are scaled to panel pixels (intelfb.cpp curSetScale).
         if (ok) curSetScale(hm.rm.w, hm.dw, hm.rm.h, hm.dh);
@@ -124,13 +125,19 @@
         for (unsigned k = 0; k < 3; k++) {
             const uint32_t dw = ((n->w * num[k] / den[k]) + 8) & ~15u, dh = ((n->h * num[k] / den[k]) + 1) & ~1u;
             if (dw > fBig[2] || dh > fBig[3] || (uint64_t)dw * 4 * dh > fBig[1]) continue;
-            const XifbKmsMode *const rr[2] = { r60, r120 };
+            // [gu605-mac] 2026-11-16: the raster's own (highest) rate too, and for whatever one pipe's scaler cannot
+            // carry, the same again over two joined pipes (i915 took PG27AQDM 4096x2304 at 240 Hz and the panel's
+            // 3840x2400 and 3200x2000 at 240 Hz that way; one pipe: nothing above 120 Hz, and nothing at all on the
+            // panel, whose every mode has the 240 Hz clock). Boot-arg -xeintelfbnojoin keeps to one pipe.
+            const XifbKmsMode *const rr[3] = { r60, r120, (n != r60 && n != r120) ? n : nullptr };
+            int nojoin = 0; const bool mayJoin = !PE_parse_boot_argn("-xeintelfbnojoin", &nojoin, sizeof nojoin);
             for (const XifbKmsMode *r : rr) {
                 if (!r || fHiN >= kHiMax) continue;
-                XifbHi hm; hm.dw = dw; hm.dh = dh; hm.rm = *r;
-                const bool ok = kmsHiCommit(hm, true);
+                XifbHi hm; hm.dw = dw; hm.dh = dh; hm.rm = *r; hm.join = 0;
+                bool ok = kmsHiCommit(hm, true);
+                if (!ok && mayJoin) { hm.join = 2; ok = kmsHiCommit(hm, true); }
                 XIFBLOG("display path: %s desktop %ux%u (looks like %ux%u) on %ux%u %u.%03u Hz -> %s", fConnName, dw, dh, dw / 2, dh / 2,
-                        r->w, r->h, r->mhz / 1000, r->mhz % 1000, ok ? "offered" : "not offered (i915 refuses it)");
+                        r->w, r->h, r->mhz / 1000, r->mhz % 1000, !ok ? "not offered (i915 refuses it)" : hm.join ? "offered, over two pipes" : "offered");
                 if (ok) fHi[fHiN++] = hm;
             }
         }
@@ -168,7 +175,7 @@
         kmsCursorPark();
         bool ok = xifbKmsCall(1, (void *)name, v, msg);
         XIFBLOG("display path: %s %ux%u %u mHz -> %s (%s)", name, w, h, mhz, ok ? "committed" : "REFUSED", msg);
-        if (ok) curSetScale(1, 1, 1, 1);
+        if (ok) { fCurHalf = 0; curSetScale(1, 1, 1, 1); }
         kmsCursorArm(ok ? "after a commit" : "after a refused commit");
         OSDecrementAtomic(&fKmsBusy);
         return ok;
@@ -200,24 +207,31 @@
         o->release();
         return want;
     }
-    // cursor A and its watermarks as an i915 commit expects to find them: off
+    // the cursor planes and their watermarks as an i915 commit expects to find them: off. Pipe B's only when this
+    // driver armed it (two joined pipes): its registers are not touched otherwise.
+    bool fKmsCurB = false;
+    void kmsCurRegsOff(uint32_t po) {
+        wr(XIFB_CUR_CTL + po, 0);
+        for (uint32_t o = 0; o < 0x20; o += 4) wr(XIFB_CUR_WM0 + po + o, 0);
+        wr(0x70168 + po, 0);
+        wr(XIFB_CUR_BASE + po, rd(XIFB_CUR_BASE + po));
+    }
     void kmsCursorPark() {
         if (!fKmsCur || !fCurLock) return;
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
         fKmsCur = false;
-        wr(XIFB_CUR_CTL, 0);
-        for (uint32_t o = 0; o < 0x20; o += 4) wr(XIFB_CUR_WM0 + o, 0);
-        wr(0x70168, 0);
-        wr(XIFB_CUR_BASE, rd(XIFB_CUR_BASE));
+        kmsCurRegsOff(0);
+        if (fKmsCurB) { kmsCurRegsOff(0x1000); fKmsCurB = false; }
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
     }
-    bool kmsCursorArm(const char *why) {
-        if (!fKmsUp && !gXifbKms) return false;
-        if (!fCurLock || !fCurKva || !kmsCurWanted()) return false;
-        const uint32_t buf = rd(XIFB_CUR_BUF), s = buf & 0xfffu, e = (buf >> 16) & 0xfffu, size = e >= s && buf ? e - s + 1 : 0;
-        uint32_t cw[9] = {}, need = 0; const uint32_t en = 1u << 31, p0 = rd(0x70240);
+    // the cursor's watermarks on the pipe at po (0, 0x1000), from plane 1's on that pipe and the DBUF share i915 gave
+    // the cursor there. cw[0..5] levels, [6] SAGV, [7] SAGV transition, [8] transition; false: no share, or too small
+    bool kmsCurWm(uint32_t po, uint32_t cw[9], uint32_t *bufOut, uint32_t *needOut) {
+        const uint32_t buf = rd(XIFB_CUR_BUF + po), s = buf & 0xfffu, e = (buf >> 16) & 0xfffu, size = e >= s && buf ? e - s + 1 : 0;
+        uint32_t need = 0; const uint32_t en = 1u << 31, p0 = rd(0x70240 + po);
+        for (int l = 0; l < 9; l++) cw[l] = 0;
         for (int l = 0; l < 7; l++) {   // levels 0..5 and the SAGV level (0x70258)
-            const uint32_t pw = rd(0x70240 + 4 * (uint32_t)l); uint32_t lines = (pw >> 14) & 0x1fffu;
+            const uint32_t pw = rd(0x70240 + po + 4 * (uint32_t)l); uint32_t lines = (pw >> 14) & 0x1fffu;
             if (!(pw & en)) continue;
             // [gu605-mac] a scaled desktop: plane 1's line counts are for ITS pixel rate (the pipe's times
             // desktop/panel in both axes), the cursor plane is not scaled. i915 counts lines as
@@ -231,22 +245,41 @@
             cw[l] = en | (pw & (1u << 30)) | (lines << 14) | (lines * 3 + 1);
             if (lines * 3 + 1 > need) need = lines * 3 + 1;
         }
-        const uint32_t pst = rd(0x7025c), pt = rd(0x70268);   // SAGV transition, transition
-        if ((pst & en) && cw[6]) cw[7] = en | (((cw[6] & 0xfffu) + ((pst & 0xfffu) - (rd(0x70258) & 0xfffu))) & 0xfffu);
+        const uint32_t pst = rd(0x7025c + po), pt = rd(0x70268 + po);   // SAGV transition, transition
+        if ((pst & en) && cw[6]) cw[7] = en | (((cw[6] & 0xfffu) + ((pst & 0xfffu) - (rd(0x70258 + po) & 0xfffu))) & 0xfffu);
         if ((pt & en) && cw[0]) cw[8] = en | (((cw[0] & 0xfffu) + ((pt & 0xfffu) - (p0 & 0xfffu))) & 0xfffu);
         for (int l = 7; l < 9; l++) if ((cw[l] & 0xfffu) > need) need = cw[l] & 0xfffu;
-        if (!(p0 & en) || !cw[0] || !size || need > size || !(rd(0x70180) & en)) {
-            if (fKmsCurLogs++ < 6 || (fKmsCurLogs & 63) == 0) XIFBLOG("display path: no hardware cursor (%s): CUR_BUF_CFG %08x (%u blocks), needs %u, plane 1 CTL %08x WM0 %08x, scale %u/%u x %u/%u", why, buf, size, need, rd(0x70180), p0, fCurNumX, fCurDenX, fCurNumY, fCurDenY);
+        if (bufOut) *bufOut = buf;
+        if (needOut) *needOut = need;
+        return (p0 & en) && cw[0] && size && need <= size && (rd(0x70180 + po) & en);
+    }
+    bool kmsCursorArm(const char *why) {
+        if (!fKmsUp && !gXifbKms) return false;
+        if (!fCurLock || !fCurKva || !kmsCurWanted()) return false;
+        uint32_t cw[9], cwb[9], buf = 0, need = 0, bufb = 0, needb = 0;
+        const bool two = fCurHalf != 0;
+        const bool okA = kmsCurWm(0, cw, &buf, &need), okB = !two || kmsCurWm(0x1000, cwb, &bufb, &needb);
+        if (!okA || !okB) {
+            if (fKmsCurLogs++ < 6 || (fKmsCurLogs & 63) == 0)
+                XIFBLOG("display path: no hardware cursor (%s): pipe A CUR_BUF_CFG %08x needs %u (plane 1 CTL %08x WM0 %08x)%s, scale %u/%u x %u/%u",
+                        why, buf, need, rd(0x70180), rd(0x70240), two ? (okB ? "; pipe B fine" : "; pipe B has no share either or too small a one") : "",
+                        fCurNumX, fCurDenX, fCurNumY, fCurDenY);
+            if (two && !okB && fKmsCurLogs < 70) XIFBLOG("display path: pipe B CUR_BUF_CFG %08x needs %u (plane 1 CTL %08x WM0 %08x)", bufb, needb, rd(0x71180), rd(0x71240));
             return false;
         }
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
         for (int l = 0; l < 8; l++) wr(XIFB_CUR_WM0 + 4 * (uint32_t)l, cw[l]);
         wr(0x70168, cw[8]);
+        if (two) {
+            for (int l = 0; l < 8; l++) wr(XIFB_CUR_WM0 + 0x1000 + 4 * (uint32_t)l, cwb[l]);
+            wr(0x71168, cwb[8]);
+            fKmsCurB = true;
+        } else if (fKmsCurB) { kmsCurRegsOff(0x1000); fKmsCurB = false; }
         fCurDdb = true; fCurReady = true; fKmsCur = true;
         curPtes();
         curRegs(curSx(fCurX), curSy(fCurY), fCurVis && fCurImg);
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
-        if (fKmsCurLogs++ < 12) XIFBLOG("display path: hardware cursor armed (%s): DBUF %u..%u, level 0 %08x, SAGV %08x, trans %08x", why, s, e, cw[0], cw[6], cw[8]);
+        if (fKmsCurLogs++ < 12) XIFBLOG("display path: hardware cursor armed (%s): pipe A DBUF %08x, level 0 %08x, SAGV %08x, trans %08x%s", why, buf, cw[0], cw[6], cw[8], two ? "; pipe B too" : "");
         return true;
     }
     // software cursor: the cursor plane is not usable under i915 right now (no DBUF share, or xeintelfb-kmscur=0)
@@ -254,10 +287,8 @@
         if (!fCurReady || !fCurLock) return;
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
         fCurReady = false; fKmsCur = false;
-        wr(XIFB_CUR_CTL, 0);
-        for (uint32_t o = 0; o < 0x20; o += 4) wr(XIFB_CUR_WM0 + o, 0);
-        wr(0x70168, 0);
-        wr(XIFB_CUR_BASE, rd(XIFB_CUR_BASE));
+        kmsCurRegsOff(0);
+        if (fKmsCurB) { kmsCurRegsOff(0x1000); fKmsCurB = false; }
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
         XIFBLOG("display path: hardware cursor off, software cursor from now on");
     }
@@ -358,7 +389,7 @@
             const bool want = kmsCurWanted();
             if (fKmsBusy) { }
             else if (fCurReady && !want) { kmsCursorOff(); kmsFireConnect("software cursor asked for"); }
-            else if (want && fCurKva && fCurLock && (!fCurReady || !fKmsCur || !(rd(XIFB_CUR_WM0) & (1u << 31)))) {
+            else if (want && fCurKva && fCurLock && (!fCurReady || !fKmsCur || !(rd(XIFB_CUR_WM0) & (1u << 31)) || (fCurHalf && !(rd(XIFB_CUR_WM0 + 0x1000) & (1u << 31))))) {
                 const bool was = fCurReady;
                 const bool ok = kmsCursorArm("tick");
                 if (ok && !was) kmsFireConnect("hardware cursor back");

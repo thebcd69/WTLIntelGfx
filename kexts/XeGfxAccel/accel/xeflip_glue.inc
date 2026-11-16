@@ -49,6 +49,7 @@ static void xfPlaceNow(void)
     if (!gXeMmio || gXeMmio->getLength() < 0x1000000) { snprintf(gXfGgtt, sizeof gXfGgtt, "no BAR0 mapping: not placed"); return; }
     IOLock *l = xfLock(); if (!l) return;
     IOLockLock(l);
+    if (!gXf.bar) gXf.pipe2 = -1;   // nothing flipped yet: one pipe until a flip finds two
     if (gXf.boot && gXf.front != gXf.boot && !xfHomeWithCopy(a)) {
         IOLockUnlock(l); snprintf(gXfGgtt, sizeof gXfGgtt, "a slot is on screen and the boot framebuffer did not come back: not placed"); return;
     }
@@ -209,7 +210,17 @@ static int xfShow(NVAccel *a, IOSurface *s, int p, bool precise)
     IOLock *l = xfLock();
     if (!l) return -8;
     IOLockLock(l);
-    gXf.bar = (volatile xf_u8 *)gXeMmio->getVirtualAddress(); gXf.pte = gXfPte; gXf.pipe = p;
+    // p: the pipe, with XF_JOINED when the picture is split over it and the next one. A change of that (i915 joined or
+    // split the pipes in a commit this code was not told of) starts over from the framebuffer on the plane now.
+    {
+        const int np = p & 0xff, np2 = (p & XF_JOINED) ? np + 1 : -1;
+        if (gXf.bar && (gXf.pipe != np || gXf.pipe2 != np2) && gXf.boot) {
+            for (int k = 0; k < XF_SLOTS; k++) xfRelease(k);
+            xf_forget(&gXf);
+            gXf.boot = 0; gXf.front = 0; gXf.delta2 = 0;
+        }
+        gXf.bar = (volatile xf_u8 *)gXeMmio->getVirtualAddress(); gXf.pte = gXfPte; gXf.pipe = np; gXf.pipe2 = np2;
+    }
     const xf_u64 key = (xf_u64)(uintptr_t)md;
     int i = xf_lookup(&gXf, key);
     if (i < 0) {
@@ -390,7 +401,7 @@ static void nvXeFlipModeChange(void)
         if (gXf.boot && gXf.front != gXf.boot) (void)xfHomeWithCopy(a);
         for (int i = 0; i < XF_SLOTS; i++) xfRelease(i);
         xf_forget(&gXf);
-        gXf.boot = 0; gXf.front = 0;
+        gXf.boot = 0; gXf.front = 0; gXf.delta2 = 0;
     }
     if (a) a->forgetBootDesc();
     if (l) IOLockUnlock(l);

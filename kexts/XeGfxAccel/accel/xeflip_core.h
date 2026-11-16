@@ -43,6 +43,7 @@ static inline int xf_pte_real(xf_u64 v) { return (v & 1) && !(v & XF_PTE_MBZ); }
 #define XF_PLANE_STRIDE(p)	(0x70188u + (xf_u32)(p) * 0x1000u)
 #define XF_PLANE_SIZE(p)	(0x70190u + (xf_u32)(p) * 0x1000u)
 #define XF_PLANE_SURF(p)	(0x7019cu + (xf_u32)(p) * 0x1000u)
+#define XF_PLANE_OFFSET(p)	(0x701a4u + (xf_u32)(p) * 0x1000u)	/* y << 16 | x of the first pixel read */
 #define XF_PLANE_SURFLIVE(p)	(0x701acu + (xf_u32)(p) * 0x1000u)
 #define XF_GFX_FLSH_CNTL	0x101008u		/* GGTT TLB invalidate */
 #define XF_GUC_TLB_INV		0xcee8u			/* GuC is on: its TLB too, as the accelerator's fb_pat does */
@@ -73,6 +74,15 @@ struct xf {
 	xf_u64 scratch;			/* i915's scratch entry, read from the first slot range checked */
 	int scratch_known;
 	int pipe;
+	/*
+	 * [gu605-mac] two joined pipes (2026-11-16): i915 can split one picture over pipe and pipe + 1, each plane reading
+	 * its half of the same framebuffer (PLANE_OFFSET x = the first half's width on the second), so that two plane
+	 * scalers share a HiDPI desktop's pixel rate (240 Hz). pipe2 is that second pipe, or -1. A flip then writes both
+	 * PLANE_SURFs, back to back; surf2 is what the second one has to be for a given first (its address differs by
+	 * delta2, 0 unless i915 moved part of the offset into the address).
+	 */
+	int pipe2;
+	xf_u32 delta2;
 	xf_u32 boot;			/* the boot framebuffer's GGTT address (PLANE_SURF before the first flip) */
 	xf_u32 front;			/* what PLANE_SURF shows now: boot or a slot */
 	xf_u64 tick;
@@ -105,18 +115,48 @@ static inline int xf_slot_of(const struct xf *x, xf_u32 addr)
 	return -1;
 }
 
-/* the pipe that shows a w x h linear XRGB8888 plane with this pitch; XF_* < 0 when none does */
+#define XF_JOINED		0x100	/* in xf_pipe_find's answer: the picture is split over that pipe and the next */
+static inline int xf_plane_fmt_ok(xf_u32 ctl) { return ((ctl >> 23) & 0x1fu) == 8 && ((ctl >> 10) & 0x7u) == 0; }
+/*
+ * The pipe that shows a w x h linear XRGB8888 plane with this pitch; XF_* < 0 when none does. With XF_JOINED set the
+ * plane is two: pipe p reads the left part and pipe p + 1 the rest of the same rows (widths add up to w, the second
+ * starts where the first ends, same height, format and stride). The second pipe of a joined pair has no transcoder of
+ * its own, so only its plane is looked at.
+ */
 static int xf_pipe_find(volatile xf_u8 *bar, xf_u32 w, xf_u32 h, xf_u32 pitch)
 {
 	int p, why = XF_NO_PIPE;
 
 	for (p = 0; p < 4; p++) {
 		xf_u32 ctl = xf_rd(bar, XF_PLANE_CTL(p)), size = xf_rd(bar, XF_PLANE_SIZE(p));
+		xf_u32 pw = (size & 0xffffu) + 1, ph = ((size >> 16) & 0xffffu) + 1;
+		int joined = 0;
+
 		if (!(xf_rd(bar, XF_TRANSCONF(p)) & 0x80000000u) || !(ctl & 0x80000000u))
 			continue;
-		if ((size & 0xffffu) + 1 != w || ((size >> 16) & 0xffffu) + 1 != h)
+		if (ph != h)
 			continue;
-		if (((ctl >> 23) & 0x1fu) != 8 || ((ctl >> 10) & 0x7u) != 0) {
+		if (pw != w) {
+			xf_u32 ctl2, size2, off2;
+
+			if (p == 3 || pw >= w)
+				continue;
+			ctl2 = xf_rd(bar, XF_PLANE_CTL(p + 1));
+			size2 = xf_rd(bar, XF_PLANE_SIZE(p + 1));
+			off2 = xf_rd(bar, XF_PLANE_OFFSET(p + 1));
+			if (!(ctl2 & 0x80000000u) || (xf_rd(bar, XF_TRANSCONF(p + 1)) & 0x80000000u))
+				continue;
+			if ((size2 & 0xffffu) + 1 != w - pw || ((size2 >> 16) & 0xffffu) + 1 != h || (off2 & 0xffffu) != pw)
+				continue;
+			if ((xf_rd(bar, XF_PLANE_OFFSET(p)) & 0xffffu) != 0)
+				continue;
+			if (!xf_plane_fmt_ok(ctl2) || (xf_rd(bar, XF_PLANE_STRIDE(p + 1)) & 0x7ffu) * 64u != pitch) {
+				why = XF_PLANE_FMT;
+				continue;
+			}
+			joined = XF_JOINED;
+		}
+		if (!xf_plane_fmt_ok(ctl)) {
 			why = XF_PLANE_FMT;
 			continue;
 		}
@@ -124,7 +164,7 @@ static int xf_pipe_find(volatile xf_u8 *bar, xf_u32 w, xf_u32 h, xf_u32 pitch)
 			why = XF_PITCH;
 			continue;
 		}
-		return p;
+		return p | joined;
 	}
 	return why;
 }
@@ -223,24 +263,34 @@ static int xf_map(struct xf *x, int i, xf_u64 key, const xf_u64 *phys, xf_u32 n)
 	return XF_OK;
 }
 
-/* PLANE_SURF := surf (its low flag bits kept); 1 when SURFLIVE shows it within a few frames */
+/*
+ * PLANE_SURF := surf (its low flag bits kept); 1 when SURFLIVE shows it within a few frames. Joined pipes: the second
+ * pipe's register right after the first's (the two latch at the same vblank unless it falls between the two writes:
+ * then one frame shows the halves of two consecutive frames), and both have to show it.
+ */
 static int xf_show(struct xf *x, xf_u32 surf)
 {
 	volatile xf_u8 *bar = x->bar;
-	xf_u32 reg = xf_rd(bar, XF_PLANE_SURF(x->pipe)), f0, n;
+	const int p2 = x->pipe2;
+	const xf_u32 surf2 = surf + x->delta2;
+	xf_u32 reg = xf_rd(bar, XF_PLANE_SURF(x->pipe)), reg2 = p2 >= 0 ? xf_rd(bar, XF_PLANE_SURF(p2)) : 0, f0, n;
 
 	xf_wr(bar, XF_PLANE_SURF(x->pipe), surf | (reg & 0xfffu));
+	if (p2 >= 0)
+		xf_wr(bar, XF_PLANE_SURF(p2), surf2 | (reg2 & 0xfffu));
 	f0 = xf_rd(bar, XF_FRMCOUNT(x->pipe));
 	for (n = 0; n < 200u; n++) {
 		if (xf_poll_hook)
 			xf_poll_hook(bar);
-		if ((xf_rd(bar, XF_PLANE_SURFLIVE(x->pipe)) & ~0xfffu) == surf)
+		if ((xf_rd(bar, XF_PLANE_SURFLIVE(x->pipe)) & ~0xfffu) == surf &&
+		    (p2 < 0 || (xf_rd(bar, XF_PLANE_SURFLIVE(p2)) & ~0xfffu) == surf2))
 			return 1;
 		if (xf_rd(bar, XF_FRMCOUNT(x->pipe)) - f0 > 3)
 			break;
 		XF_PAUSE(n);
 	}
-	return (xf_rd(bar, XF_PLANE_SURFLIVE(x->pipe)) & ~0xfffu) == surf;
+	return (xf_rd(bar, XF_PLANE_SURFLIVE(x->pipe)) & ~0xfffu) == surf &&
+	    (p2 < 0 || (xf_rd(bar, XF_PLANE_SURFLIVE(p2)) & ~0xfffu) == surf2);
 }
 
 /* show slot i; if the panel does not take it, the boot surface goes back up */
@@ -248,8 +298,10 @@ static int xf_flip(struct xf *x, int i)
 {
 	xf_u32 want = xf_slot_addr(x, i);
 
-	if (!x->boot)
+	if (!x->boot) {
 		x->boot = xf_rd(x->bar, XF_PLANE_SURF(x->pipe)) & ~0xfffu;
+		x->delta2 = x->pipe2 >= 0 ? (xf_rd(x->bar, XF_PLANE_SURF(x->pipe2)) & ~0xfffu) - x->boot : 0;
+	}
 	if (x->front == want)
 		return XF_OK;
 	if (xf_show(x, want)) {

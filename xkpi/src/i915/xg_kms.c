@@ -460,10 +460,11 @@ xg_kms_dump(char *buf, unsigned long len)
 			msleep(250);
 			f1 = intel_de_read(i915, PIPE_FRMCOUNT_G4X(i915, to_intel_crtc(crtc)->pipe));
 		}
-		xg_out(&b, "crtc %s id %u enable %d active %d %ux%u measured %u Hz psr %d drrs %d (active %d)\n", crtc->name,
-		    crtc->base.id, crtc->state->enable, crtc->state->active, crtc->state->mode.hdisplay,
+		xg_out(&b, "crtc %s id %u enable %d active %d %ux%u measured %u Hz psr %d drrs %d (active %d) joined pipes 0x%x\n",
+		    crtc->name, crtc->base.id, crtc->state->enable, crtc->state->active, crtc->state->mode.hdisplay,
 		    crtc->state->mode.vdisplay, (f1 - f0) * 4, to_intel_crtc_state(crtc->state)->has_psr,
-		    to_intel_crtc_state(crtc->state)->has_drrs, intel_drrs_is_active(to_intel_crtc(crtc)));
+		    to_intel_crtc_state(crtc->state)->has_drrs, intel_drrs_is_active(to_intel_crtc(crtc)),
+		    to_intel_crtc_state(crtc->state)->joiner_pipes);
 	}
 	drm_connector_list_iter_begin(dev, &it);
 	drm_for_each_connector_iter(connector, &it)
@@ -497,7 +498,7 @@ xg_kms_connector(struct drm_device *dev, const char *name)
 static int
 xg_kms_set2(const char *name, unsigned int w, unsigned int h, unsigned int mhz, unsigned int sw, unsigned int sh, int test,
     char *msg, unsigned long msglen);
-/* a test check asks i915 for this many joined pipes (debug.xegfx_kms_set "... join=2 test"); 0 = i915 decides */
+/* the next set asks i915 for this many joined pipes (op 7, or debug.xegfx_kms_set "... join=2"); 0 = i915 decides */
 int xg_kms_test_join;
 
 int
@@ -533,7 +534,7 @@ xg_kms_set2(const char *name, unsigned int w, unsigned int h, unsigned int mhz, 
 	struct drm_device *dev;
 	struct intel_encoder *enc;
 	unsigned int bd = ~0u, d, joined = 0;
-	const int tj = test ? xg_kms_test_join : 0;	/* one request only: the next check is i915's own choice again */
+	const int tj = xg_kms_test_join;	/* this request only (0: i915's own choice); a commit leaves it on the connector */
 	int ret;
 
 	xg_kms_test_join = 0;
@@ -741,22 +742,24 @@ retry:
 	plane_state->src_h = (big != NULL ? sh : mode.vdisplay) << 16;
 	plane_state->rotation = DRM_MODE_ROTATE_0;
 	/*
-	 * [gu605-mac] join=N in a test: the connector's force_joined_pipes for this one check (i915's own debug knob: the
-	 * picture split over N pipes, each with its own plane scaler at 1/N of the pixel rate; uncompressed on display
-	 * version 13 and later). The scaler's limit is cdclk: plane pixel rate / 2 <= 652.8 MHz here, which one pipe cannot
-	 * meet for a 2.56x desktop at 240 Hz. Only asked, never committed: the flip and cursor code know one pipe.
+	 * [gu605-mac] joined pipes: the connector's force_joined_pipes (i915's own debug knob) for this request. The picture
+	 * is split over N pipes, each with its own plane scaler at 1/N of the pixel rate (uncompressed on display version
+	 * 13 and later). The scaler's limit is cdclk: plane pixel rate / 2 <= 652.8 MHz here, which one pipe cannot meet for
+	 * a 2.56x desktop at 240 Hz; two can (measured 2026-11-16: PG27AQDM 4096x2304 at 240 Hz, the panel 3840x2400 at
+	 * 240 Hz). A check puts the connector's value back; a commit leaves its own there, so that whatever i915 computes
+	 * for this connector later (a retrain, a hotplug) comes to the same split.
 	 */
 	{
 		struct intel_connector *ic = to_intel_connector(connector);
 		const int join0 = ic->force_joined_pipes;
 
 		joined = 0;
-		if (tj > 0)
-			ic->force_joined_pipes = tj;
+		ic->force_joined_pipes = tj > 0 ? tj : 0;
 		ret = test ? drm_atomic_check_only(state) : drm_atomic_commit(state);
-		if (ret == 0 && test)
+		if (ret == 0)
 			joined = to_intel_crtc_state(crtc_state)->joiner_pipes;
-		ic->force_joined_pipes = join0;
+		if (test || ret != 0)
+			ic->force_joined_pipes = join0;
 	}
 out:
 	if (ret == -EDEADLK) {

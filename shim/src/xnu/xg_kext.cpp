@@ -1129,6 +1129,7 @@ xg_kms_after_stage4(void)
 	}
 }
 
+static int gKmsParsedJoin;	/* join= of the string parsed last; handed to xg_kms.c under gKmsLock */
 /* "NAME", "NAME HZ", "NAME WxH", "NAME WxH@HZ", each optionally followed by " test"; HZ may be mHz (> 1000) */
 static int
 xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h, unsigned *mhz, int *test, unsigned *sw,
@@ -1140,7 +1141,7 @@ xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h
 	*w = *h = *mhz = 0;
 	*test = 0;
 	*sw = *sh = 0;
-	xg_kms_test_join = 0;
+	gKmsParsedJoin = 0;
 	while (*p == ' ')
 		p++;
 	while (*p && *p != ' ' && n + 1 < nl)
@@ -1156,10 +1157,10 @@ xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h
 			p += 4;
 			continue;
 		}
-		if (strncmp(p, "join=", 5) == 0) {	/* tests only: i915 joins this many pipes for the check (xg_kms.c) */
-			xg_kms_test_join = (int)strtoul(p + 5, (char **)&p, 10);
-			if (xg_kms_test_join < 0 || xg_kms_test_join > 2)
-				xg_kms_test_join = 0;
+		if (strncmp(p, "join=", 5) == 0) {	/* i915 joins this many pipes for this request (xg_kms.c) */
+			gKmsParsedJoin = (int)strtoul(p + 5, (char **)&p, 10);
+			if (gKmsParsedJoin < 0 || gKmsParsedJoin > 2)
+				gKmsParsedJoin = 0;
 			continue;
 		}
 		if (strncmp(p, "src=", 4) == 0) {	/* a desktop size scaled onto the raster: src=4096x2560 */
@@ -1241,15 +1242,17 @@ xg_kms_call(uintptr_t op, void *a, void *b, void *c)
 				*(int *)c = ret;
 		}
 		break;
-	case 7: {	/* [gu605-mac] set with a desktop size (HiDPI): b = uint32_t[6] {w, h, mHz, test, desktop w, desktop h} */
+	case 7: {	/* [gu605-mac] set with a desktop size (HiDPI): b = uint32_t[6] {w, h, mHz, test, desktop w, desktop h};
+			 * test: bit 0 = only check, bits 8-9 = pipes i915 is to join for it (0: its own choice) */
 		const uint32_t *v = (const uint32_t *)b;
 		char m[128];
 		if (a && v) {
-			ret = xg_kms_set_scaled((const char *)a, v[0], v[1], v[2], v[4], v[5], (int)v[3], m, sizeof(m));
+			xg_kms_test_join = (int)((v[3] >> 8) & 3);
+			ret = xg_kms_set_scaled((const char *)a, v[0], v[1], v[2], v[4], v[5], (int)(v[3] & 1), m, sizeof(m));
 			if (c)
 				strlcpy((char *)c, m, 128);
-			if (!v[3] || ret)
-				IOLog("XeGfx: kms set (fb, desktop %ux%u%s): %s\n", v[4], v[5], v[3] ? ", test" : "", m);
+			if (!(v[3] & 1) || ret)
+				IOLog("XeGfx: kms set (fb, desktop %ux%u%s): %s\n", v[4], v[5], (v[3] & 1) ? ", test" : "", m);
 		}
 		break;
 	}
@@ -1314,6 +1317,7 @@ xegfx_kms_set_sysctl(struct sysctl_oid *, void *, int, struct sysctl_req *req)
 	if (!xg_kms_ready())
 		return ENXIO;
 	IOLockLock(gKmsLock);
+	xg_kms_test_join = gKmsParsedJoin;
 	err = sw ? xg_kms_set_scaled(name, w, h, mhz, sw, sh, test, gKmsMsg, sizeof(gKmsMsg))
 	    : xg_kms_set(name, w, h, mhz, test, gKmsMsg, sizeof(gKmsMsg));
 	IOLockUnlock(gKmsLock);
