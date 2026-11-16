@@ -50,7 +50,7 @@ kms_hold() {
   # in the foreground: launchd ends the job's whole process group when this script exits (no AbandonProcessGroup)
   sleep 300 & wait $!; trap - TERM INT HUP; pend 0; say "kms: 5 minutes up with i915 owning the display, pending mark cleared"
 }
-finish() { hold_release "run ending"; kms_hold; say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; exit 0; }
+finish() { hold_release "run ending"; kms_hold; say "end: $*"; { echo; echo "stage results s0..s7: $(results)"; } >> "$S"; cp "$S" "$L/last-summary.txt"; efi_copy "$S" last-boot.txt; sync; [ "${NOSLEEP:-0}" = 1 ] && exec /usr/bin/caffeinate -i; exit 0; }
 # run folders are never deleted here (a few MB each); gu605-collect.sh reports their size
 
 say "GU605 auto, $(sw_vers -productVersion) ($(sw_vers -buildVersion)), boot $(sysctl -n kern.boottime | sed -E 's/.*\} //')"
@@ -267,6 +267,12 @@ if [ "$frames" -gt 0 ] && [ "$starts" -le 1 ]; then
     fi
   fi
   sysctl debug.nvaccel_iop_ok_h4 debug.nvaccel_iop_fail debug.nvaccel_pipe_perform 2>/dev/null >> "$S"
+  # 2026-11-16: ten minutes idle, the display went to sleep, a minute later the system began its idle sleep and stayed in
+  # a dark wake (capabilities 9) that the USB keyboard and mouse could not end; only a declared user activity brought
+  # the picture back. System sleep on this path is untested, so idle sleep is held off while this desktop runs: the
+  # job stays alive as "caffeinate -i" (launchd ends it at shutdown). Display sleep and a sleep the owner asks for
+  # (Apple menu, lid) are not touched.
+  if [ "$(conf NO_IDLE_SLEEP 1)" = 1 ]; then NOSLEEP=1; say "idle sleep: held off while this desktop runs (NO_IDLE_SLEEP=1; caffeinate -i)"; fi
   finish "desktop on the Intel GPU"
 fi
 if [ "$BOOTWS" = 1 ]; then

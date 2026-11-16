@@ -46,3 +46,7 @@ HOLD=0
 # on for the next boot, zero-copy flip switched on), and how long each of the two flip switches is watched after that
 CONFIRM_S=180
 FLIP_GUARD_S=60
+
+# 1 = no idle system sleep while the Intel desktop runs (the runner stays alive as "caffeinate -i"). On 2026-11-16 an
+# idle sleep left the machine in a dark wake that keyboard and mouse could not end. Display sleep is not affected.
+NO_IDLE_SLEEP=1
