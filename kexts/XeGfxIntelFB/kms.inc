@@ -217,8 +217,17 @@
         const uint32_t buf = rd(XIFB_CUR_BUF), s = buf & 0xfffu, e = (buf >> 16) & 0xfffu, size = e >= s && buf ? e - s + 1 : 0;
         uint32_t cw[9] = {}, need = 0; const uint32_t en = 1u << 31, p0 = rd(0x70240);
         for (int l = 0; l < 7; l++) {   // levels 0..5 and the SAGV level (0x70258)
-            const uint32_t pw = rd(0x70240 + 4 * (uint32_t)l), lines = (pw >> 14) & 0x1fffu;
+            const uint32_t pw = rd(0x70240 + 4 * (uint32_t)l); uint32_t lines = (pw >> 14) & 0x1fffu;
             if (!(pw & en)) continue;
+            // [gu605-mac] a scaled desktop: plane 1's line counts are for ITS pixel rate (the pipe's times
+            // desktop/panel in both axes), the cursor plane is not scaled. i915 counts lines as
+            // ceil(latency * rate / htotal), so ceil(lines * panel/desktop) is never less than the cursor's own.
+            // WAS (v11): plane 1's lines as they are -> more blocks than i915's cursor share (32), and one second
+            // after every HiDPI commit "no cursor share from i915": software cursor again (owner: still in steps).
+            if (lines && (fCurNumX != fCurDenX || fCurNumY != fCurDenY)) {
+                const uint64_t n = (uint64_t)fCurNumX * fCurNumY, d = (uint64_t)fCurDenX * fCurDenY;
+                lines = (uint32_t)(((uint64_t)lines * n + d - 1) / d);
+            }
             cw[l] = en | (pw & (1u << 30)) | (lines << 14) | (lines * 3 + 1);
             if (lines * 3 + 1 > need) need = lines * 3 + 1;
         }
@@ -227,7 +236,7 @@
         if ((pt & en) && cw[0]) cw[8] = en | (((cw[0] & 0xfffu) + ((pt & 0xfffu) - (p0 & 0xfffu))) & 0xfffu);
         for (int l = 7; l < 9; l++) if ((cw[l] & 0xfffu) > need) need = cw[l] & 0xfffu;
         if (!(p0 & en) || !cw[0] || !size || need > size || !(rd(0x70180) & en)) {
-            if (fKmsCurLogs++ < 6) XIFBLOG("display path: no hardware cursor (%s): CUR_BUF_CFG %08x (%u blocks), needs %u, plane 1 CTL %08x WM0 %08x", why, buf, size, need, rd(0x70180), p0);
+            if (fKmsCurLogs++ < 6 || (fKmsCurLogs & 63) == 0) XIFBLOG("display path: no hardware cursor (%s): CUR_BUF_CFG %08x (%u blocks), needs %u, plane 1 CTL %08x WM0 %08x, scale %u/%u x %u/%u", why, buf, size, need, rd(0x70180), p0, fCurNumX, fCurDenX, fCurNumY, fCurDenY);
             return false;
         }
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
