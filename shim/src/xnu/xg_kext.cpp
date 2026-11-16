@@ -150,6 +150,7 @@ int xg_kms_i2c(const char *name, struct xg_kms_i2c *x);
 extern void (*xg_kms_notify)(void);
 int xg_sysctl_reload_tunables(void);
 extern unsigned int xg_kms_hotplugs;
+extern int xg_kms_test_join;
 }
 static bool xg_kms_ready(void);
 static int xg_kms_call(uintptr_t op, void *a, void *b, void *c);
@@ -1139,6 +1140,7 @@ xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h
 	*w = *h = *mhz = 0;
 	*test = 0;
 	*sw = *sh = 0;
+	xg_kms_test_join = 0;
 	while (*p == ' ')
 		p++;
 	while (*p && *p != ' ' && n + 1 < nl)
@@ -1152,6 +1154,12 @@ xg_kms_parse_set(const char *in, char *name, size_t nl, unsigned *w, unsigned *h
 		if (strncmp(p, "test", 4) == 0) {
 			*test = 1;
 			p += 4;
+			continue;
+		}
+		if (strncmp(p, "join=", 5) == 0) {	/* tests only: i915 joins this many pipes for the check (xg_kms.c) */
+			xg_kms_test_join = (int)strtoul(p + 5, (char **)&p, 10);
+			if (xg_kms_test_join < 0 || xg_kms_test_join > 2)
+				xg_kms_test_join = 0;
 			continue;
 		}
 		if (strncmp(p, "src=", 4) == 0) {	/* a desktop size scaled onto the raster: src=4096x2560 */

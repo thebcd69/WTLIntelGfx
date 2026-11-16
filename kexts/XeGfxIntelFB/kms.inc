@@ -84,7 +84,10 @@
         const bool ok = xifbKmsCall(7, (void *)fConnName, v, msg);
         XIFBLOG("display path: %s desktop %ux%u on %ux%u %u mHz -> %s (%s)", fConnName, hm.dw, hm.dh, hm.rm.w, hm.rm.h, hm.rm.mhz,
                 ok ? "committed" : "REFUSED", msg);
-        if (!ok) kmsCursorArm("after a refused commit");
+        // WAS (v10): no hardware cursor on a scaled desktop, WindowServer drew the pointer and it moved in steps
+        // (owner, 2026-11-16). Now the image and the positions are scaled to panel pixels (intelfb.cpp curSetScale).
+        if (ok) curSetScale(hm.rm.w, hm.dw, hm.rm.h, hm.dh);
+        kmsCursorArm(ok ? "after a commit" : "after a refused commit");
         OSDecrementAtomic(&fKmsBusy);
         return ok;
     }
@@ -165,6 +168,7 @@
         kmsCursorPark();
         bool ok = xifbKmsCall(1, (void *)name, v, msg);
         XIFBLOG("display path: %s %ux%u %u mHz -> %s (%s)", name, w, h, mhz, ok ? "committed" : "REFUSED", msg);
+        if (ok) curSetScale(1, 1, 1, 1);
         kmsCursorArm(ok ? "after a commit" : "after a refused commit");
         OSDecrementAtomic(&fKmsBusy);
         return ok;
@@ -209,7 +213,6 @@
     }
     bool kmsCursorArm(const char *why) {
         if (!fKmsUp && !gXifbKms) return false;
-        if (kmsHiNow()) return false;   // a scaled desktop: the cursor plane is in panel pixels, WindowServer draws the pointer
         if (!fCurLock || !fCurKva || !kmsCurWanted()) return false;
         const uint32_t buf = rd(XIFB_CUR_BUF), s = buf & 0xfffu, e = (buf >> 16) & 0xfffu, size = e >= s && buf ? e - s + 1 : 0;
         uint32_t cw[9] = {}, need = 0; const uint32_t en = 1u << 31, p0 = rd(0x70240);
@@ -232,7 +235,7 @@
         wr(0x70168, cw[8]);
         fCurDdb = true; fCurReady = true; fKmsCur = true;
         curPtes();
-        curRegs(fCurX, fCurY, fCurVis && fCurImg);
+        curRegs(curSx(fCurX), curSy(fCurY), fCurVis && fCurImg);
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
         if (fKmsCurLogs++ < 12) XIFBLOG("display path: hardware cursor armed (%s): DBUF %u..%u, level 0 %08x, SAGV %08x, trans %08x", why, s, e, cw[0], cw[6], cw[8]);
         return true;
@@ -343,7 +346,7 @@
             unsigned h = 0; if (xifbKmsCall(4, &h, nullptr, nullptr) && h != fKmsHot) { fKmsHot = h; kmsHotplug(); }
             // the cursor follows xeintelfb-kmscur and comes back after an i915 commit from elsewhere; a change of
             // path reaches IOFramebuffer through the connect interrupt (it asks for every cursor image again)
-            const bool want = kmsCurWanted() && !kmsHiNow();
+            const bool want = kmsCurWanted();
             if (fKmsBusy) { }
             else if (fCurReady && !want) { kmsCursorOff(); kmsFireConnect("software cursor asked for"); }
             else if (want && fCurKva && fCurLock && (!fCurReady || !fKmsCur || !(rd(XIFB_CUR_WM0) & (1u << 31)))) {
@@ -442,7 +445,7 @@ public:
         if (mode == fCurId) return kIOReturnSuccess;
         if (const XifbHi *hm = kmsHi(mode)) {
             if (!kmsHiCommit(*hm, false)) return kIOReturnUnsupportedMode;
-            fCurId = mode;   // the pointer: kmsCursorArm refuses from here on, the tick tells IOFramebuffer within a second
+            fCurId = mode;
             if (!fExternal) fIntMhz = hm->rm.mhz;
             setProperty("XeGfxKmsMode", (unsigned long long)mode, 32);
             return kIOReturnSuccess;

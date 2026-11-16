@@ -278,6 +278,59 @@ class XeGfxIntelFramebuffer : public IONDRVFramebuffer {
     IOBufferMemoryDescriptor *fCurMem = nullptr; IOMemoryMap *fCurMap = nullptr; uint32_t *fCurKva = nullptr;
     uint64_t fCurPte[XIFB_CUR_DIM * XIFB_CUR_DIM * 4 / 4096] = {};
     IOSimpleLock *fCurLock = nullptr; bool fCurReady = false, fCurDdb = false, fCurOn = false;
+    // [gu605-mac] HiDPI desktops: the cursor plane is in panel pixels and is not scaled with the desktop plane, so the
+    // image WindowServer hands over (desktop pixels) is kept here and drawn into the plane's memory shrunk by
+    // panel/desktop (fCurNum/fCurDen per axis; 1/1 on an unscaled desktop), and positions are scaled the same way.
+    uint32_t *fCurSrc = nullptr; unsigned fCurSw = 0, fCurSh = 0;
+    uint32_t fCurNumX = 1, fCurDenX = 1, fCurNumY = 1, fCurDenY = 1;
+    static SInt32 curFloorDiv(SInt64 a, SInt64 b) { SInt64 q = a / b; if ((a % b) != 0 && ((a < 0) != (b < 0))) q--; return (SInt32)q; }
+    SInt32 curSx(SInt32 x) const { return fCurNumX == fCurDenX ? x : curFloorDiv((SInt64)x * fCurNumX, fCurDenX); }
+    SInt32 curSy(SInt32 y) const { return fCurNumY == fCurDenY ? y : curFloorDiv((SInt64)y * fCurNumY, fCurDenY); }
+    // fCurSrc (premultiplied ARGB, fCurSw x fCurSh) -> the plane's 256x256: copied, or area-averaged when the desktop is
+    // larger than the panel (exact integer weights: a panel pixel covers den/num desktop pixels per axis)
+    static uint64_t curMin(uint64_t a, uint64_t b) { return a < b ? a : b; }
+    static uint64_t curMax(uint64_t a, uint64_t b) { return a > b ? a : b; }
+    void curRender() {
+        if (!fCurKva || !fCurSrc) return;
+        const unsigned D = XIFB_CUR_DIM;
+        const uint64_t nx = fCurNumX, dx = fCurDenX, ny = fCurNumY, dy = fCurDenY;
+        if (nx == dx && ny == dy) {
+            for (unsigned y = 0; y < D; y++)
+                for (unsigned x = 0; x < D; x++) fCurKva[y * D + x] = (y < fCurSh && x < fCurSw) ? fCurSrc[y * D + x] : 0;
+        } else {
+            const unsigned ow = (unsigned)curMin((uint64_t)D, (fCurSw * nx + dx - 1) / dx), oh = (unsigned)curMin((uint64_t)D, (fCurSh * ny + dy - 1) / dy);
+            const uint64_t tot = dx * dy;
+            for (unsigned oy = 0; oy < D; oy++)
+                for (unsigned ox = 0; ox < D; ox++) {
+                    if (oy >= oh || ox >= ow) { fCurKva[oy * D + ox] = 0; continue; }
+                    uint64_t acc[4] = { 0, 0, 0, 0 };
+                    const uint64_t y0 = oy * dy, y1 = y0 + dy, x0 = ox * dx, x1 = x0 + dx;
+                    for (uint64_t sy = y0 / ny; sy * ny < y1 && sy < fCurSh; sy++) {
+                        const uint64_t wy = curMin((sy + 1) * ny, y1) - curMax(sy * ny, y0);
+                        for (uint64_t sx = x0 / nx; sx * nx < x1 && sx < fCurSw; sx++) {
+                            const uint64_t w = wy * (curMin((sx + 1) * nx, x1) - curMax(sx * nx, x0));
+                            const uint32_t p = fCurSrc[sy * D + sx];
+                            acc[0] += w * (p >> 24); acc[1] += w * ((p >> 16) & 255); acc[2] += w * ((p >> 8) & 255); acc[3] += w * (p & 255);
+                        }
+                    }
+                    fCurKva[oy * D + ox] = ((uint32_t)((acc[0] + tot / 2) / tot) << 24) | ((uint32_t)((acc[1] + tot / 2) / tot) << 16) |
+                                           ((uint32_t)((acc[2] + tot / 2) / tot) << 8) | (uint32_t)((acc[3] + tot / 2) / tot);
+                }
+        }
+        __asm__ __volatile__("sfence" ::: "memory");
+    }
+    // from the mode paths (kms.inc): the scale of the desktop now on the panel
+    void curSetScale(uint32_t numX, uint32_t denX, uint32_t numY, uint32_t denY) {
+        if (!numX || !denX || !numY || !denY || numX > denX || numY > denY) numX = denX = numY = denY = 1;
+        if (numX == fCurNumX && denX == fCurDenX && numY == fCurNumY && denY == fCurDenY) return;
+        fCurNumX = numX; fCurDenX = denX; fCurNumY = numY; fCurDenY = denY;
+        XIFBLOG("hw cursor: scale %u/%u x %u/%u (panel/desktop)", numX, denX, numY, denY);
+        if (!fCurKva || !fCurSrc || !fCurLock) return;
+        curRender();
+        IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
+        if (fCurReady && fCurDdb) curRegs(curSx(fCurX), curSy(fCurY), fCurVis && fCurImg);
+        IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
+    }
     uint32_t rd(uint32_t o) { return fR[o / 4]; }
     void wr(uint32_t o, uint32_t v) { fR[o / 4] = v; }
     void waitFrame() { uint32_t a = rd(0x70040); for (int i = 0; i < 50 && rd(0x70040) == a; i++) IODelay(500); }
@@ -319,8 +372,9 @@ class XeGfxIntelFramebuffer : public IONDRVFramebuffer {
             fCurPte[i] = pa | 1 | (1ull << 53);
         }
         bzero(fCurKva, bytes); __asm__ __volatile__("sfence" ::: "memory");
+        fCurSrc = (uint32_t *)IOMalloc(bytes); if (fCurSrc) bzero(fCurSrc, bytes);
         fCurLock = IOSimpleLockAlloc();
-        fCurReady = fCurLock != nullptr;
+        fCurReady = fCurLock != nullptr && fCurSrc != nullptr;
         XIFBLOG("hw cursor ready: %ux%u ARGB at GGTT %08x", XIFB_CUR_DIM, XIFB_CUR_DIM, XIFB_CUR_GGTT);
         return fCurReady;
     }
@@ -368,9 +422,10 @@ public:
                 for (unsigned x = 0; x < XIFB_CUR_DIM; x++) {
                     uint32_t p = (y < ci.cursorHeight && x < ci.cursorWidth) ? st[y * ci.cursorWidth + x] : 0, a = p >> 24;
                     uint32_t r = (((p >> 16) & 255) * a + 127) / 255, g = (((p >> 8) & 255) * a + 127) / 255, b = ((p & 255) * a + 127) / 255;
-                    fCurKva[y * XIFB_CUR_DIM + x] = (a << 24) | (r << 16) | (g << 8) | b;
+                    fCurSrc[y * XIFB_CUR_DIM + x] = (a << 24) | (r << 16) | (g << 8) | b;
                 }
-            __asm__ __volatile__("sfence" ::: "memory");
+            fCurSw = (unsigned)ci.cursorWidth; fCurSh = (unsigned)ci.cursorHeight;
+            curRender();
         }
         IOFree(st, bytes);
         static unsigned n; if (++n <= 4) XIFBLOG("hw cursor image %u: %s %ux%u", n, ok ? "ok" : "declined", (unsigned)ci.cursorWidth, (unsigned)ci.cursorHeight);
@@ -379,7 +434,7 @@ public:
         // the DBUF is i915's then (kmsCursorArm uses the share i915 reserved)
         if (!gXifbKms) curDdb();
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
-        curPtes(); fCurImg = true; if (fCurDdb) curRegs(fCurX, fCurY, fCurVis);
+        curPtes(); fCurImg = true; if (fCurDdb) curRegs(curSx(fCurX), curSy(fCurY), fCurVis);
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
         return kIOReturnSuccess;
     }
@@ -387,7 +442,7 @@ public:
         if (!fCurReady) return IONDRVFramebuffer::setCursorState(x, y, visible);
         IOInterruptState is = IOSimpleLockLockDisableInterrupt(fCurLock);
         fCurX = x; fCurY = y; fCurVis = visible;
-        if (fCurDdb) curRegs(x, y, visible && fCurImg);
+        if (fCurDdb) curRegs(curSx(x), curSy(y), visible && fCurImg);
         IOSimpleLockUnlockEnableInterrupt(fCurLock, is);
         static unsigned n; if (++n <= 3) XIFBLOG("hw cursor state %u: %d,%d %s", n, (int)x, (int)y, visible ? "shown" : "hidden");
         return kIOReturnSuccess;

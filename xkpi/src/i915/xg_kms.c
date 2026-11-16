@@ -497,6 +497,8 @@ xg_kms_connector(struct drm_device *dev, const char *name)
 static int
 xg_kms_set2(const char *name, unsigned int w, unsigned int h, unsigned int mhz, unsigned int sw, unsigned int sh, int test,
     char *msg, unsigned long msglen);
+/* a test check asks i915 for this many joined pipes (debug.xegfx_kms_set "... join=2 test"); 0 = i915 decides */
+int xg_kms_test_join;
 
 int
 xg_kms_set(const char *name, unsigned int w, unsigned int h, unsigned int mhz, int test, char *msg, unsigned long msglen)
@@ -530,7 +532,7 @@ xg_kms_set2(const char *name, unsigned int w, unsigned int h, unsigned int mhz, 
 	struct drm_framebuffer *fb;
 	struct drm_device *dev;
 	struct intel_encoder *enc;
-	unsigned int bd = ~0u, d;
+	unsigned int bd = ~0u, d, joined = 0;
 	int ret;
 
 	if (msglen)
@@ -736,7 +738,24 @@ retry:
 	plane_state->src_w = (big != NULL ? sw : mode.hdisplay) << 16;
 	plane_state->src_h = (big != NULL ? sh : mode.vdisplay) << 16;
 	plane_state->rotation = DRM_MODE_ROTATE_0;
-	ret = test ? drm_atomic_check_only(state) : drm_atomic_commit(state);
+	/*
+	 * [gu605-mac] join=N in a test: the connector's force_joined_pipes for this one check (i915's own debug knob: the
+	 * picture split over N pipes, each with its own plane scaler at 1/N of the pixel rate; uncompressed on display
+	 * version 13 and later). The scaler's limit is cdclk: plane pixel rate / 2 <= 652.8 MHz here, which one pipe cannot
+	 * meet for a 2.56x desktop at 240 Hz. Only asked, never committed: the flip and cursor code know one pipe.
+	 */
+	{
+		struct intel_connector *ic = to_intel_connector(connector);
+		const int join0 = ic->force_joined_pipes;
+
+		joined = 0;
+		if (test && xg_kms_test_join > 0)
+			ic->force_joined_pipes = xg_kms_test_join;
+		ret = test ? drm_atomic_check_only(state) : drm_atomic_commit(state);
+		if (ret == 0 && test)
+			joined = to_intel_crtc_state(crtc_state)->joiner_pipes;
+		ic->force_joined_pipes = join0;
+	}
 out:
 	if (ret == -EDEADLK) {
 		drm_atomic_state_clear(state);
@@ -744,16 +763,17 @@ out:
 		goto retry;
 	}
 	if (ret == 0 && big != NULL)
-		snprintf(msg, msglen, "%s %s desktop %ux%u on %ux%u %u.%03u Hz clock %d on %s", test ? "test ok" : "committed",
+		snprintf(msg, msglen, "%s %s desktop %ux%u on %ux%u %u.%03u Hz clock %d on %s%s", test ? "test ok" : "committed",
 		    name, sw, sh, mode.hdisplay, mode.vdisplay, xg_mode_mhz(&mode) / 1000, xg_mode_mhz(&mode) % 1000, mode.clock,
-		    target ? target->name : "?");
+		    target ? target->name : "?", joined == 0x3 ? " + pipe B (joined)" : joined ? " (joined pipes)" : "");
 	else if (ret == 0)
 		snprintf(msg, msglen, "%s %s %ux%u %u.%03u Hz clock %d on %s", test ? "test ok" : "committed", name,
 		    mode.hdisplay, mode.vdisplay, xg_mode_mhz(&mode) / 1000, xg_mode_mhz(&mode) % 1000, mode.clock,
 		    target ? target->name : "?");
 	else if (msglen && msg[0] == 0)
-		snprintf(msg, msglen, "%s %s %ux%u %u.%03u Hz: error %d", test ? "test" : "commit", name, mode.hdisplay,
-		    mode.vdisplay, xg_mode_mhz(&mode) / 1000, xg_mode_mhz(&mode) % 1000, ret);
+		snprintf(msg, msglen, "%s %s %ux%u %u.%03u Hz%s: error %d", test ? "test" : "commit", name, mode.hdisplay,
+		    mode.vdisplay, xg_mode_mhz(&mode) / 1000, xg_mode_mhz(&mode) % 1000,
+		    test && xg_kms_test_join > 0 ? " joined" : "", ret);
 	drm_atomic_state_put(state);
 	drm_modeset_drop_locks(&ctx);
 	drm_modeset_acquire_fini(&ctx);
