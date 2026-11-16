@@ -128,24 +128,37 @@
             if (d120 < 2500 && (!r120 || d120 < (r120->mhz > 120000 ? r120->mhz - 120000 : 120000 - r120->mhz))) r120 = &m;
         }
         // desktops: raster x 1.6 ("looks like" raster / 1.25: Windows' 125 %), x 1.5, x 1.25; width a multiple of 16
+        // [gu605-mac] v17, owner 2026-11-16: "Dahili ekran için 1600x1000 HiDPI ve 1920x1200 HiDPI, PG27AQDM için
+        // 2048x1152 HiDPI ... kalanları sil, Mac kendi kendine geçmesin başka çözünürlüklere". So: the panel gets
+        // x 1.5 and x 1.25, a monitor x 1.6, each at ONE rate: the fastest i915 takes (the raster's top rate, over two
+        // pipes when needed; then 120 Hz, then 60 Hz). Every other mode stays in the list for the driver's own
+        // commits but is marked never-show and not safe (kmsInfo, connectFlags).
         static const uint32_t num[] = { 8, 3, 5 }, den[] = { 5, 2, 4 };
+        const XifbKmsMode *rmax = nullptr;
+        for (int i = 0; i < fKmN; i++) {
+            const XifbKmsMode &m = fKm[i];
+            if (m.w != n->w || m.h != n->h || (m.flags & 0x10) || !m.mhz || (!fExternal && kmsStretched(m))) continue;
+            if (!rmax || m.mhz > rmax->mhz) rmax = &m;
+        }
         for (unsigned k = 0; k < 3; k++) {
+            if (fExternal ? k != 0 : k == 0) continue;
             const uint32_t dw = ((n->w * num[k] / den[k]) + 8) & ~15u, dh = ((n->h * num[k] / den[k]) + 1) & ~1u;
             if (dw > fBig[2] || dh > fBig[3] || (uint64_t)dw * 4 * dh > fBig[1]) continue;
             // [gu605-mac] 2026-11-16: the raster's own (highest) rate too, and for whatever one pipe's scaler cannot
             // carry, the same again over two joined pipes (i915 took PG27AQDM 4096x2304 at 240 Hz and the panel's
             // 3840x2400 and 3200x2000 at 240 Hz that way; one pipe: nothing above 120 Hz, and nothing at all on the
             // panel, whose every mode has the 240 Hz clock). Boot-arg -xeintelfbnojoin keeps to one pipe.
-            const XifbKmsMode *const rr[3] = { r60, r120, (n != r60 && n != r120) ? n : nullptr };
+            const XifbKmsMode *const rr[3] = { rmax, (r120 != rmax) ? r120 : nullptr, (r60 != rmax && r60 != r120) ? r60 : nullptr };
             int nojoin = 0; const bool mayJoin = !PE_parse_boot_argn("-xeintelfbnojoin", &nojoin, sizeof nojoin);
+            bool have = false;
             for (const XifbKmsMode *r : rr) {
-                if (!r || fHiN >= kHiMax) continue;
+                if (!r || have || fHiN >= kHiMax) continue;
                 XifbHi hm; hm.dw = dw; hm.dh = dh; hm.rm = *r; hm.join = 0;
                 bool ok = kmsHiCommit(hm, true);
                 if (!ok && mayJoin) { hm.join = 2; ok = kmsHiCommit(hm, true); }
                 XIFBLOG("display path: %s desktop %ux%u (looks like %ux%u) on %ux%u %u.%03u Hz -> %s", fConnName, dw, dh, dw / 2, dh / 2,
                         r->w, r->h, r->mhz / 1000, r->mhz % 1000, !ok ? "not offered (i915 refuses it)" : hm.join ? "offered, over two pipes" : "offered");
-                if (ok) fHi[fHiN++] = hm;
+                if (ok) { fHi[fHiN++] = hm; have = true; }
             }
         }
         setProperty("XeGfxHiDPIModes", (unsigned long long)fHiN, 32);
@@ -447,8 +460,21 @@
         d.horizontalSyncConfig = (km->flags & 1) ? 1 : 0; d.verticalSyncConfig = (km->flags & 4) ? 1 : 0;   // +hsync, +vsync
         d.signalConfig = kIODigitalSignal;
     }
+    // [gu605-mac] v17: with HiDPI desktops on offer they are the only modes macOS may choose; the default is the
+    // smallest desktop (the panel's "1600 x 1000", the monitor's one).
+    bool kmsHiOnly() const { return fHiN > 0; }
+    const XifbHi *kmsHiDefault() const {
+        const XifbHi *d = nullptr;
+        for (int i = 0; i < fHiN; i++) if (!d || fHi[i].dw < d->dw) d = &fHi[i];
+        return d;
+    }
     void kmsInfo(const XifbKmsMode *m, IODisplayModeInformation *info) {
         info->nominalWidth = m->w; info->nominalHeight = m->h; info->refreshRate = kmsHz16(*m);
+        if (kmsHiOnly()) {
+            info->flags = (info->flags & ~(UInt32)(kDisplayModeDefaultFlag | kDisplayModeSafeFlag | kDisplayModeValidForHiResFlag)) | kDisplayModeValidFlag | kDisplayModeNeverShowFlag;
+            if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }
+            return;
+        }
         info->flags = (info->flags & ~(UInt32)kDisplayModeDefaultFlag) | kDisplayModeValidFlag | kDisplayModeSafeFlag | kDisplayModeValidForHiResFlag;
         if (fExternal && m == kmsBest()) info->flags |= kDisplayModeDefaultFlag;
         if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }
@@ -515,7 +541,8 @@ public:
     // obtain mode info", "Setting main display offline", WindowServer on a virtual display, one still frame on the
     // monitor. The flags replace the mode's safety flags (valid, safe, default) in that call.
     IOReturn connectFlags(IOIndex ci, IODisplayModeID mode, IOOptionBits *flags) override {
-        if (kmsHi(mode)) { if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag; return kIOReturnSuccess; }
+        if (kmsHi(mode)) { if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag | (kmsHi(mode) == kmsHiDefault() ? kDisplayModeDefaultFlag : 0); return kIOReturnSuccess; }
+        if (kmsHiOnly() && (kmsMode(mode) || (fBootId && mode == fBootId))) { if (flags) *flags = kDisplayModeValidFlag | kDisplayModeNeverShowFlag; return kIOReturnSuccess; }
         if (!kmsMode(mode)) return IONDRVFramebuffer::connectFlags(ci, mode, flags);
         if (flags) *flags = kDisplayModeValidFlag | kDisplayModeSafeFlag | (fExternal && kmsMode(mode) == kmsBest() ? kDisplayModeDefaultFlag : 0);
         return kIOReturnSuccess;

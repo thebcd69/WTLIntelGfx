@@ -700,13 +700,19 @@ public:
         if (hm) {   // a HiDPI desktop: its own size at the raster mode's refresh; never the default
             kmsInfo(&hm->rm, info);
             info->nominalWidth = hm->dw; info->nominalHeight = hm->dh;
-            info->flags = (info->flags & ~(UInt32)kDisplayModeDefaultFlag) | kDisplayModeNotPresetFlag;
+            // v17: the HiDPI desktops are the only choice (kmsInfo marked the raster mode never-show: undo that here)
+            info->flags = (info->flags & ~(UInt32)(kDisplayModeDefaultFlag | kDisplayModeNeverShowFlag)) | kDisplayModeValidFlag | kDisplayModeSafeFlag |
+                          kDisplayModeValidForHiResFlag | kDisplayModeNotPresetFlag;
+            if (hm == kmsHiDefault()) info->flags |= kDisplayModeDefaultFlag;
             return r;
         }
         if (fHz16 && !(fGu605 && fBootId && mode == fBootId && fBootHz16)) info->refreshRate = fHz16;
         if (fGu605 && fBootId && mode == fBootId && fBootHz16) info->refreshRate = fBootHz16;
         if (fEdidLen && fEdid[21] && fEdid[22]) { info->imageWidth = fEdid[21] * 10; info->imageHeight = fEdid[22] * 10; }
-        info->flags |= kDisplayModeValidForHiResFlag;
+        if (fGu605 && fBootId && mode == fBootId && kmsHiOnly())   // v17: the firmware's mode is where the boot starts, not a choice
+            info->flags = (info->flags & ~(UInt32)(kDisplayModeDefaultFlag | kDisplayModeSafeFlag | kDisplayModeValidForHiResFlag)) | kDisplayModeNeverShowFlag;
+        else
+            info->flags |= kDisplayModeValidForHiResFlag;
         return r;
     }
 };
