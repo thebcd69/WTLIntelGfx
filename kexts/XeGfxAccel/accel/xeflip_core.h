@@ -83,6 +83,7 @@ struct xf {
 	 */
 	int pipe2;
 	xf_u32 delta2;
+	xf_u32 layout;			/* xf_layout() when boot and delta2 were read; 0 = not read */
 	xf_u32 boot;			/* the boot framebuffer's GGTT address (PLANE_SURF before the first flip) */
 	xf_u32 front;			/* what PLANE_SURF shows now: boot or a slot */
 	xf_u64 tick;
@@ -152,9 +153,13 @@ static int xf_pipe_find(volatile xf_u8 *bar, xf_u32 w, xf_u32 h, xf_u32 pitch)
 			 * PLANE_SURF_1B = PLANE_SURF_1A + 0x2000; a 3200 wide desktop gives + 0x1000 and x 576). WAS: only
 			 * PLANE_OFFSET's x == pw, which never held, so every joined frame was copied.
 			 */
+			/*
+			 * v7: judged by PLANE_OFFSET alone (what is left of pw pixels after whole pages), not by the two
+			 * PLANE_SURFs: those are the registers this code writes, and a value of its own from before a commit
+			 * it was not told of made the test fail for good (2026-11-16 16:52, monitor plugged back in).
+			 */
 			if ((size2 & 0xffffu) + 1 != w - pw || ((size2 >> 16) & 0xffffu) + 1 != h || (off2 >> 16) != 0 ||
-			    ((xf_rd(bar, XF_PLANE_SURF(p + 1)) & ~0xfffu) - (xf_rd(bar, XF_PLANE_SURF(p)) & ~0xfffu)) +
-			    (off2 & 0xffffu) * 4u != pw * 4u)
+			    (off2 & 0xffffu) > pw || (((pw - (off2 & 0xffffu)) * 4u) & 0xfffu) != 0)
 				continue;
 			if ((xf_rd(bar, XF_PLANE_OFFSET(p)) & 0xffffu) != 0)
 				continue;
@@ -272,6 +277,23 @@ static int xf_map(struct xf *x, int i, xf_u64 key, const xf_u64 *phys, xf_u32 n)
 }
 
 /*
+ * [gu605-mac] v7: what i915 has on the plane(s), from registers this code never writes (sizes, stride, the second
+ * plane's offset). boot and delta2 belong to one such picture. When i915 commits another one without this code being
+ * told (XeGfxIntelFB v18 goes to the HiDPI desktop itself when a display comes or goes), the old values must neither
+ * be written back (xf_home) nor reused: the monitor plugged back in after the panel showed the left half of the
+ * desktop twice, the second pipe reading at the panel's distance (0x1000) instead of the monitor's (0x2000).
+ */
+static xf_u32 xf_layout(struct xf *x)
+{
+	volatile xf_u8 *bar = x->bar;
+	xf_u32 v = xf_rd(bar, XF_PLANE_SIZE(x->pipe)) * 31u + xf_rd(bar, XF_PLANE_STRIDE(x->pipe));
+
+	if (x->pipe2 >= 0)
+		v = (v * 31u + xf_rd(bar, XF_PLANE_SIZE(x->pipe2))) * 31u + xf_rd(bar, XF_PLANE_OFFSET(x->pipe2));
+	return v | 1u;
+}
+
+/*
  * PLANE_SURF := surf (its low flag bits kept); 1 when SURFLIVE shows it within a few frames. Joined pipes: the second
  * pipe's register right after the first's (the two latch at the same vblank unless it falls between the two writes:
  * then one frame shows the halves of two consecutive frames), and both have to show it.
@@ -306,9 +328,17 @@ static int xf_flip(struct xf *x, int i)
 {
 	xf_u32 want = xf_slot_addr(x, i);
 
+	if (x->boot && x->layout != xf_layout(x)) {	/* another picture on the plane: start over from it */
+		x->boot = 0;
+		x->front = 0;
+	}
 	if (!x->boot) {
 		x->boot = xf_rd(x->bar, XF_PLANE_SURF(x->pipe)) & ~0xfffu;
-		x->delta2 = x->pipe2 >= 0 ? (xf_rd(x->bar, XF_PLANE_SURF(x->pipe2)) & ~0xfffu) - x->boot : 0;
+		/* the second plane starts pw pixels in: PLANE_OFFSET's x plus whole pages in its PLANE_SURF */
+		x->delta2 = x->pipe2 >= 0 ? (((xf_rd(x->bar, XF_PLANE_SIZE(x->pipe)) & 0xffffu) + 1) -
+		    (xf_rd(x->bar, XF_PLANE_OFFSET(x->pipe2)) & 0xffffu)) * 4u : 0;
+		x->layout = xf_layout(x);
+		x->front = x->boot;
 	}
 	if (x->front == want)
 		return XF_OK;
@@ -327,6 +357,11 @@ static int xf_home(struct xf *x)
 {
 	if (!x->boot || !x->bar || x->front == x->boot)
 		return 1;
+	if (x->layout != xf_layout(x)) {	/* i915 put another picture there: nothing of ours to put back */
+		x->boot = 0;
+		x->front = 0;
+		return 1;
+	}
 	if (!xf_show(x, x->boot))
 		return 0;
 	x->front = x->boot;
