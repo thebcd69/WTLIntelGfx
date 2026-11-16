@@ -755,6 +755,16 @@ retry:
 
 		joined = 0;
 		ic->force_joined_pipes = tj > 0 ? tj : 0;
+		/*
+		 * [gu605-mac] i915 decides on joined pipes only while it computes a pipe's configuration, and it does that
+		 * only in a full modeset. A new desktop size at the raster the pipe already runs is no modeset to it: the
+		 * pipe kept its one-pipe configuration, the plane's scaler then needed more than cdclk gives, and the
+		 * request came back -22 (2026-11-16 16:03, eDP 3200x2000 on 2560x1600 at 240 Hz: "required cdclk (879122
+		 * kHz) exceeds max (652800 kHz)", pipe B never in the state). The same held for the PG27AQDM whenever the
+		 * firmware had lit it at 240 Hz. So: when the split asked for is not the one the pipe has, say so.
+		 */
+		if ((tj > 1) != (to_intel_crtc_state(target->state)->joiner_pipes != 0))
+			crtc_state->mode_changed = true;
 		ret = test ? drm_atomic_check_only(state) : drm_atomic_commit(state);
 		if (ret == 0)
 			joined = to_intel_crtc_state(crtc_state)->joiner_pipes;
