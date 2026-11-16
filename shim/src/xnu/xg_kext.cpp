@@ -77,16 +77,50 @@ extern unsigned long long xg_spin_max_us;
 extern unsigned int xg_spin_long;
 /* the firmware's console image, when pipe A scans it out at probe; i915's stolen allocator starts after it */
 unsigned long long xg_boot_fb_phys, xg_boot_fb_size;
-/* the physical address the firmware gave macOS for its console image (boot-args video), 0 if there is none */
+/*
+ * The physical address the firmware gave macOS for its console image, 0 if it is not known.
+ * WAS (3a7c21f): IOPlatformExpert::getConsoleInfo() at the time of asking. Once IOFramebuffer has opened the display it
+ * has put the console's kernel VIRTUAL address there (kPEBaseAddressChange): the HiDPI check read 0xffffff... and
+ * refused. XeGfxIntelFB reads the console at its own start, while it is still the firmware's physical address, and
+ * appends that range to the iGPU's device memory (xifbAddConsoleRange): the range of the device that is not one of
+ * its two BARs is taken from there. getConsoleInfo() is only the fallback, and only if it reads as a physical address.
+ */
+static IOPCIDevice *xg_find_igpu(void);
 extern "C" unsigned long long
 xg_console_phys(void)
 {
-	PE_Video v;
+	unsigned long long found = 0;
+	IOPCIDevice *gpu = xg_find_igpu();
 
-	bzero(&v, sizeof(v));
-	if (IOService::getPlatform() == NULL || IOService::getPlatform()->getConsoleInfo(&v) != kIOReturnSuccess)
-		return (0);
-	return ((unsigned long long)v.v_baseAddr);
+	if (gpu != nullptr) {
+		IODeviceMemory *b0 = gpu->getDeviceMemoryWithRegister((UInt8)kIOPCIConfigBaseAddress0);
+		IODeviceMemory *b2 = gpu->getDeviceMemoryWithRegister((UInt8)kIOPCIConfigBaseAddress2);
+		OSArray *mem = gpu->getDeviceMemory();
+		unsigned n = mem ? mem->getCount() : 0;
+
+		for (unsigned i = 0; i < n && found == 0; i++) {
+			IOMemoryDescriptor *m = OSDynamicCast(IOMemoryDescriptor, mem->getObject(i));
+			unsigned long long a;
+
+			if (m == nullptr || m == b0 || m == b2)
+				continue;
+			a = m->getPhysicalAddress();
+			if ((b0 != nullptr && a >= b0->getPhysicalAddress() && a < b0->getPhysicalAddress() + b0->getLength()) ||
+			    (b2 != nullptr && a >= b2->getPhysicalAddress() && a < b2->getPhysicalAddress() + b2->getLength()))
+				continue;
+			found = a;
+		}
+		gpu->release();
+	}
+	if (found == 0) {
+		PE_Video v;
+
+		bzero(&v, sizeof(v));
+		if (IOService::getPlatform() != NULL && IOService::getPlatform()->getConsoleInfo(&v) == kIOReturnSuccess &&
+		    ((unsigned long long)v.v_baseAddr >> 46) == 0)
+			found = (unsigned long long)v.v_baseAddr;
+	}
+	return (found);
 }
 /*
  * GU605 branch, display path (docs/GU605-DISPLAY-DESIGN.md): -1 not a GU605 (the overlay keeps its tunables), 0 GU605
