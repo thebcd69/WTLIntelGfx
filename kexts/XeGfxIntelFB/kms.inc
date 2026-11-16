@@ -163,6 +163,18 @@
         }
         setProperty("XeGfxHiDPIModes", (unsigned long long)fHiN, 32);
     }
+    // [gu605-mac] v18: the display the driver has just taken goes to its default HiDPI desktop before IOFramebuffer
+    // is told about the change, so the current mode is always one of the modes on show.
+    void kmsHiEnter() {
+        const XifbHi *d = kmsHiDefault();
+        if (!d || kmsHiNow()) return;
+        const IODisplayModeID id = kHiBase | ((IODisplayModeID)(d - fHi) << 8);
+        if (!kmsHiCommit(*d, false)) return;
+        IOLockLock(fKmsLock); fCurId = id; IOLockUnlock(fKmsLock);
+        hybridForget();
+        if (!fExternal) fIntMhz = d->rm.mhz;
+        setProperty("XeGfxKmsMode", (unsigned long long)id, 32);
+    }
     // the connector's modes from i915; true when it is connected. cur gets the mode on its CRTC (w == 0: none)
     bool kmsLoad(const char *name, XifbKmsMode *cur, XifbKmsMode *out, int *n) {
         const size_t sz = sizeof(XifbKmsMode) * (kKmsMax + 1);
@@ -355,6 +367,7 @@
                 (unsigned)fBootId, fBootW, fBootH, fBootHz16 >> 16, ((fBootHz16 & 0xffff) * 100) >> 16, fKmN, (unsigned)fCurId, cur.mhz);
         int off = 0;
         if (!PE_parse_boot_argn("-xeintelfbnoext", &off, sizeof off)) kmsHotplug(true);
+        kmsHiEnter();
         kmsFireConnect("i915 modes");
     }
     // single display: an external monitor takes over when it appears, the panel comes back when it goes
@@ -387,7 +400,7 @@
             kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); kmsHiOffer(); fCurId = kmsIdFor(cur);
             IOLockUnlock(fKmsLock);
             XIFBLOG("display path: %s has the picture (%d modes, %ux%u, EDID %d B); the panel is off", ext, en, cur.w, cur.h, fEdidLen);
-            if (!quiet) kmsFireConnect("monitor connected");
+            if (!quiet) { kmsHiEnter(); kmsFireConnect("monitor connected"); }
         } else if (!ext && fExternal) {
             if (!kmsCommit("eDP-1", fBootW, fBootH, fIntMhz)) return;
             XifbKmsMode cur; bzero(&cur, sizeof cur);
@@ -397,7 +410,7 @@
             kmsLoad(fConnName, &cur, fKm, &fKmN); kmsOffer(); kmsHiOffer(); fCurId = kmsIdFor(cur);
             IOLockUnlock(fKmsLock);
             XIFBLOG("display path: monitor gone, the panel is back at %u mHz", fIntMhz);
-            if (!quiet) kmsFireConnect("monitor disconnected");
+            if (!quiet) { kmsHiEnter(); kmsFireConnect("monitor disconnected"); }
         }
     }
     void kmsTick() {
@@ -462,7 +475,12 @@
     }
     // [gu605-mac] v17: with HiDPI desktops on offer they are the only modes macOS may choose; the default is the
     // smallest desktop (the panel's "1600 x 1000", the monitor's one).
-    bool kmsHiOnly() const { return fHiN > 0; }
+    // [gu605-mac] v18: only while the display IS on one of them. v17 hid the other modes whenever a HiDPI desktop was
+    // on offer; after the monitor was pulled the panel was back on the firmware's mode (hidden), WindowServer set that
+    // mode again and then took the display offline (2026-11-16 16:39:46 "Setting mode 0x64 ... Setting main display
+    // ... offline", a black panel with the pointer). So the driver itself goes to the default desktop whenever it
+    // takes a display (kmsHiEnter), and if that fails nothing is hidden.
+    bool kmsHiOnly() const { return fHiN > 0 && kmsHiNow(); }
     const XifbHi *kmsHiDefault() const {
         const XifbHi *d = nullptr;
         for (int i = 0; i < fHiN; i++) if (!d || fHi[i].dw < d->dw) d = &fHi[i];
@@ -550,7 +568,7 @@ public:
     // the boot NDRV's preferred configuration is the firmware's mode, which is not in the list while a monitor has
     // the picture; and it cannot remember an i915 mode
     IOReturn getStartupDisplayMode(IODisplayModeID *mode, IOIndex *depth) override {
-        if (!fKmsUp || !fBootId || !fExternal) return IONDRVFramebuffer::getStartupDisplayMode(mode, depth);
+        if (!fKmsUp || !fBootId || (!fExternal && !kmsHiNow())) return IONDRVFramebuffer::getStartupDisplayMode(mode, depth);
         if (mode) *mode = fCurId;
         if (depth) *depth = fBootDepth;
         return kIOReturnSuccess;
