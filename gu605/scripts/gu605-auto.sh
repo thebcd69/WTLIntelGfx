@@ -125,6 +125,36 @@ w=0; while [ "$(fbst)" != started ] && [ $w -lt 40 ]; do sleep 1; w=$((w+1)); do
 # stages 1-2 are read-only; from 3 on a hang is possible, so the pending mark goes first
 bash "$G/gu605-stages.sh" 2 "$R/stages" || finish "stages 1-2 failed (see stages/)"
 { echo "== display as the firmware left it (stage 2)"; cat "$R/stages/display-decoded.txt" 2>/dev/null; } >> "$S"
+# [gu605-mac] hybrid (XeGfxIntelFB hybrid.inc): Standard with nvram xeintelfb-hybrid=1. The framebuffer publishes itself as
+# head 4 of NullMoth's NVIDIA accelerator and switches debug.nvaccel_igpu on from the kernel; this only watches, and
+# registers the head late (NVAccel's own debug.nvaccelfb=3) when it missed NVRM's arming. A WindowServer restart, which
+# a late head needs before WindowServer composites it, happens only with HYBRID_WSRESTART=1 in gu605.conf.
+hyv() { sysctl -n "$1" 2>/dev/null || echo "-"; }
+hystate() { echo "igpu $(hyv debug.nvaccel_igpu) armed $(hyv debug.nvaccelfb) published $(hyv debug.nvaccel_heads_published) registered $(hyv debug.nvaccel_heads_registered) piped $(hyv debug.nvaccel_heads_piped) frames h0 $(hyv debug.nvaccel_iop_ok_h0) h4 $(hyv debug.nvaccel_iop_ok_h4) fail $(hyv debug.nvaccel_iop_fail)"; }
+hybrid_watch() {
+  case "$(nvram xeintelfb-hybrid 2>/dev/null | cut -f2)" in 1|%01) ;; *) return 0 ;; esac
+  local i late=0 p h4 ws
+  say "hybrid: nvram xeintelfb-hybrid=1; NMIntelFB objects $(ioreg -r -c NMIntelFB -d 1 2>/dev/null | grep -c '<class NMIntelFB'); $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | grep -E '"XeGfxHybrid[A-Za-z]*"|"IOFBDependentIndex"|"IOAccelTypes"|"IOAccelIndex"' | sed -E 's/^[ |]*//' | tr '\n' ' ')"
+  say "hybrid: $(hystate)"
+  for i in $(seq 1 45); do
+    h4=$(hyv debug.nvaccel_iop_ok_h4); [ "$h4" != "-" ] && [ "$h4" -gt 0 ] && break
+    p=$(hyv debug.nvaccel_heads_piped)
+    if [ $late = 0 ] && [ $i -ge 10 ] && [ "$p" != "-" ] && [ $(( p & 16 )) = 0 ] && [ "$(hyv debug.nvaccelfb)" = 1 ]; then
+      late=1; sysctl -w debug.nvaccel_igpu=1 > /dev/null 2>&1; sysctl -w debug.nvaccelfb=3 > /dev/null 2>&1
+      say "hybrid: head 4 had no pipe 20 s on: registered late (debug.nvaccelfb=3) -> $(hystate)"
+      if [ "$(conf HYBRID_WSRESTART 0)" = 1 ]; then
+        ws=$(pgrep -x WindowServer | head -1); say "hybrid: restarting WindowServer $ws (HYBRID_WSRESTART=1; console user $(stat -f %Su /dev/console 2>/dev/null))"
+        killall WindowServer 2>/dev/null; sleep 6
+        [ "$(pgrep -x WindowServer | head -1)" != "$ws" ] || launchctl kickstart -k system/com.apple.WindowServer
+      fi
+    fi
+    sleep 2
+  done
+  say "hybrid: after $(( i * 2 )) s: $(hystate)"
+  say "hybrid: $(ioreg -r -c XeGfxIntelFramebuffer -d 1 -l -w0 2>/dev/null | grep -E '"XeGfxHybrid[A-Za-z]*"|"IOFBDependentIndex"|"IOAccelTypes"|"IOAccelIndex"' | sed -E 's/^[ |]*//' | tr '\n' ' ')"
+  system_profiler SPDisplaysDataType 2>/dev/null | grep -E "Chipset|Resolution|UI Looks|Main Display|Online" | sed 's/^ */  /' >> "$S"
+}
+[ "$MODE" = standard ] && hybrid_watch
 [ $T -le 2 ] && finish "probe done"
 pend 1
 if ! bash "$G/gu605-stages.sh" "$T" "$R/stages"; then pend 0; finish "stages to $T failed (see stages/)"; fi

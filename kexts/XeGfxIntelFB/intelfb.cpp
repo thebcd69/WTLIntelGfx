@@ -463,6 +463,9 @@ public:
         if (xifbGuardTripped()) { XIFBLOG("boot guard tripped (two starts without WindowServer): declining"); return nullptr; }
         // GU605: only when the iGPU drives the panel (Standard/Eco); in Ultimate the panel and console are NVIDIA's
         if (xifbIsGu605(provider) && !xifbGu605OwnsPanel(provider)) return nullptr;
+        // [gu605-mac] hybrid (hybrid.inc): in Standard with nvram xeintelfb-hybrid=1 the subclass named NMIntelFB takes the
+        // device (NullMoth's NVIDIA accelerator looks for that name), everywhere else this class does, as before
+        if (hybridWanted(provider) != hybridClass()) return nullptr;
         return IONDRVFramebuffer::probe(provider, score);
     }
     // [gu605-mac] XeGfxIntelFB-Start in ioreg: how far start() got, so a refused start is visible without the kernel
@@ -473,6 +476,7 @@ public:
     void startStep(const char *step) { setProperty("XeGfxIntelFB-Start", step); }
     bool start(IOService *provider) override {
         fGu605 = xifbIsGu605(provider);
+        fHybrid = hybridClass();
         startStep("begin");
         if (!getProperty(gIONameMatchedKey))
             XIFBLOG("start: not matched by name (no IONameMatched): IONDRVFramebuffer::start will only make "
@@ -538,6 +542,7 @@ public:
         startStep(getProperty(gIONameMatchedKey) ? "IONDRVFramebuffer::start (name matched)"
                                                   : "IONDRVFramebuffer::start (NOT name matched: will return false)");
         ddcPublish();   // gu605-ddc: before IOFramebuffer::open builds the I2C nubs
+        hybridBeforeStart(provider);   // hybrid.inc: IOFBDependentID and Index 4 have to be there when the start publishes this object
         bool ok = IONDRVFramebuffer::start(provider);
         startStep(ok ? "started" : (getProperty(gIONameMatchedKey) ? "FAILED in IONDRVFramebuffer::start (name matched)"
                                                                    : "FAILED: not matched by name (IONameMatch display missing)"));
@@ -551,10 +556,11 @@ public:
         // a GPU's own framebuffer driver names its GPU and its slot; IONDRVFramebuffer does not, and XeGfxAGDC left
         // GFX0's framebuffer out without it (23:02 "has no IOFBDependentIndex number"). Only with the console here:
         // a framebuffer without it never comes online and must not be reported.
-        if (ok && vram && !getProperty("IOFBDependentIndex")) {
+        if (ok && vram && (fHybrid || !getProperty("IOFBDependentIndex"))) {
             setProperty("IOFBDependentID", provider->getRegistryEntryID(), 64);
-            setProperty("IOFBDependentIndex", 0ULL, 32);
-            XIFBLOG("IOFBDependentID %#llx, IOFBDependentIndex 0", provider->getRegistryEntryID());
+            // hybrid: the index stays 4 for NVAccel; open() shows IOGraphics 0 (hybrid.inc)
+            if (!fHybrid) setProperty("IOFBDependentIndex", 0ULL, 32);
+            XIFBLOG("IOFBDependentID %#llx, IOFBDependentIndex %u", provider->getRegistryEntryID(), fHybrid ? 4 : 0);
         }
         uint32_t t[13];
         if (ok && vram && fEdidLen && !getProperty("NVRMTiming") && xifbEdidTiming(fEdid, fEdidLen, t))
@@ -660,19 +666,20 @@ public:
         fVblEnabled = state != kDisabledInterruptState;
         return kIOReturnSuccess;
     }
-    bool hasDDCConnect(IOIndex ci) override { return fEdidLen ? true : IONDRVFramebuffer::hasDDCConnect(ci); }
+    bool hasDDCConnect(IOIndex ci) override { return (fEdidLen && !hyAnon()) ? true : IONDRVFramebuffer::hasDDCConnect(ci); }
 #include "kms.inc"
 #include "boot.inc"
 #include "ddc.inc"
+#include "hybrid.inc"
 
     IOReturn getDDCBlock(IOIndex ci, UInt32 block, IOSelect type, IOOptionBits opt, UInt8 *data, IOByteCount *len) override {
-        if (!fEdidLen) return IONDRVFramebuffer::getDDCBlock(ci, block, type, opt, data, len);
+        if (!fEdidLen || hyAnon()) return IONDRVFramebuffer::getDDCBlock(ci, block, type, opt, data, len);
         if (!data || !len || block < 1 || (int)(block * 128) > fEdidLen) return kIOReturnUnsupported;
         IOByteCount n = *len < 128 ? *len : 128; bcopy(fEdid + (block - 1) * 128, data, n); *len = n;
         return kIOReturnSuccess;
     }
     IOReturn getAppleSense(IOIndex ci, UInt32 *senseType, UInt32 *primary, UInt32 *extended, UInt32 *displayType) override {
-        if (!fBacklight || ci != 0 || fExternal) return IONDRVFramebuffer::getAppleSense(ci, senseType, primary, extended, displayType);
+        if (!fBacklight || ci != 0 || fExternal || hyAnon()) return IONDRVFramebuffer::getAppleSense(ci, senseType, primary, extended, displayType);
         if (senseType) *senseType = 0;
         if (primary) *primary = 0;
         if (extended) *extended = 0;
@@ -680,8 +687,8 @@ public:
         return kIOReturnSuccess;
     }
     IOReturn getAttributeForConnection(IOIndex ci, IOSelect attr, uintptr_t *value) override {
-        if (fGu605 && ci == 0 && attr == kConnectionFlags && value) { *value = fExternal ? 0 : kIOConnectionBuiltIn; return kIOReturnSuccess; }
-        if (fEdidLen && attr == kConnectionSupportsHLDDCSense) return kIOReturnSuccess;
+        if (fGu605 && ci == 0 && attr == kConnectionFlags && value) { *value = (fExternal || hyAnon()) ? 0 : kIOConnectionBuiltIn; return kIOReturnSuccess; }
+        if (fEdidLen && !hyAnon() && attr == kConnectionSupportsHLDDCSense) return kIOReturnSuccess;
         return IONDRVFramebuffer::getAttributeForConnection(ci, attr, value);
     }
     // the panel's size and refresh, and ValidForHiRes so the 2x sizes reach Displays settings (I-059 on NVRMFB)
@@ -705,5 +712,13 @@ public:
 };
 
 OSDefineMetaClassAndStructors(XeGfxIntelFramebuffer, IONDRVFramebuffer)
+// [gu605-mac] hybrid (hybrid.inc): the same driver under the class name NullMoth's NVIDIA accelerator watches for
+// (serviceMatching("NMIntelFB")). Its personality in Info.plist has the higher probe score; probe() lets exactly one of
+// the two classes take the device.
+class NMIntelFB : public XeGfxIntelFramebuffer {
+    OSDeclareDefaultStructors(NMIntelFB)
+    bool hybridClass() const override { return true; }
+};
+OSDefineMetaClassAndStructors(NMIntelFB, XeGfxIntelFramebuffer)
 static int xifbHoldRead() { XeGfxIntelFramebuffer *f = gXifbHold; return (f && f->fHoldBusy) ? 1 : 0; }
 static void xifbHoldEnd() { if (XeGfxIntelFramebuffer *f = gXifbHold) f->holdRelease("runner"); }

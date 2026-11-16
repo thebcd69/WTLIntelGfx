@@ -26,7 +26,8 @@ pci_display_present() {   # pci_display_present <vendor hex, e.g. 10de>
     /"class-code" = </ { s = $0; sub(/.*</, "", s); sub(/>.*/, "", s); cls = substr(s, 7, 2) substr(s, 5, 2) substr(s, 3, 2) substr(s, 1, 2) }
     END { if (ven == v && cls ~ /^0003/) found = 1; print found ? 1 : 0 }'
 }
-igpu_fb_present() { [ "$(ioreg -r -c XeGfxIntelFramebuffer -d 1 2>/dev/null | grep -c XeGfxIntelFramebuffer)" -gt 0 ] && echo 1 || echo 0; }
+# [gu605-mac] the object can be of the subclass NMIntelFB (Standard hybrid): ioreg -c lists it, but its line names that class
+igpu_fb_present() { [ "$(ioreg -r -c XeGfxIntelFramebuffer -d 1 2>/dev/null | grep -c '<class ')" -gt 0 ] && echo 1 || echo 0; }
 # [gu605-mac] 1 when a framebuffer of ANY class, with a display attached, sits on the Intel display PCI device (8086, class 03): our
 # XeGfxIntelFramebuffer, or Apple's IONDRVFramebuffer (.Display_boot) when ours did not start. WAS: only our class
 # counted, so an Eco boot where XeGfxIntelFB failed was taken for Ultimate (2026-11-05 10:53).

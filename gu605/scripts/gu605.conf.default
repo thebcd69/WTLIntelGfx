@@ -50,3 +50,6 @@ FLIP_GUARD_S=60
 # 1 = no idle system sleep while the Intel desktop runs (the runner stays alive as "caffeinate -i"). On 2026-11-16 an
 # idle sleep left the machine in a dark wake that keyboard and mouse could not end. Display sleep is not affected.
 NO_IDLE_SLEEP=1
+# Standard hybrid (nvram xeintelfb-hybrid=1: WindowServer on the NVIDIA GPU, picture through the Intel GPU's displays):
+# 1 = when this framebuffer missed NVRM's arming and was registered late, restart WindowServer once (ends the session)
+HYBRID_WSRESTART=0

@@ -486,6 +486,7 @@ public:
         if (const XifbHi *hm = kmsHi(mode)) {
             if (!kmsHiCommit(*hm, false)) return kIOReturnUnsupportedMode;
             fCurId = mode;
+            hybridForget();   // hybrid.inc: other memory behind the display from here on
             if (!fExternal) fIntMhz = hm->rm.mhz;
             setProperty("XeGfxKmsMode", (unsigned long long)mode, 32);
             return kIOReturnSuccess;
@@ -495,6 +496,7 @@ public:
         const uint32_t w = km ? km->w : fBootW, h = km ? km->h : fBootH, mhz = km ? km->mhz : (uint32_t)(((uint64_t)fBootHz16 * 1000) >> 16);
         if (!kmsCommit(fConnName, w, h, mhz)) return kIOReturnUnsupportedMode;
         fCurId = mode;
+        hybridForget();
         if (!fExternal) fIntMhz = mhz;
         setProperty("XeGfxKmsMode", (unsigned long long)mode, 32);
         return kIOReturnSuccess;
